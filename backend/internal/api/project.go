@@ -21,7 +21,7 @@ func NewProjectHandler(db *gorm.DB) *ProjectHandler {
 // GetProjects 获取项目列表
 func (h *ProjectHandler) GetProjects(c *gin.Context) {
 	var projects []model.Project
-	query := h.db.Preload("Tags").Preload("Parent")
+	query := h.db.Preload("Tags")
 
 	// 权限过滤：普通用户只能看到自己参与的项目
 	query = utils.FilterProjectsByUser(h.db, c, query)
@@ -105,8 +105,6 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 	if err := h.db.
 		Preload("Members.User").
 		Preload("Tags").
-		Preload("Parent").
-		Preload("Children").
 		First(&project, id).Error; err != nil {
 		utils.Error(c, 404, "项目不存在")
 		return
@@ -155,30 +153,25 @@ func (h *ProjectHandler) getProjectStatistics(projectID uint) gin.H {
 	var openBugCount, inProgressBugCount, resolvedBugCount int64
 	var inProgressRequirementCount, completedRequirementCount int64
 
-	projectIDs := []uint{projectID}
-	var childIDs []uint
-	h.db.Model(&model.Project{}).Where("parent_id = ?", projectID).Pluck("id", &childIDs)
-	projectIDs = append(projectIDs, childIDs...)
-
-	// 一级项目自动汇总直属子项目
-	h.db.Model(&model.Task{}).Where("project_id IN ?", projectIDs).Count(&taskCount)
-	h.db.Model(&model.Task{}).Where("project_id IN ? AND status = ?", projectIDs, "wait").Count(&todoTaskCount)
-	h.db.Model(&model.Task{}).Where("project_id IN ? AND status = ?", projectIDs, "doing").Count(&inProgressTaskCount)
-	h.db.Model(&model.Task{}).Where("project_id IN ? AND status = ?", projectIDs, "done").Count(&doneTaskCount)
+	// 任务统计
+	h.db.Model(&model.Task{}).Where("project_id = ?", projectID).Count(&taskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "wait").Count(&todoTaskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "doing").Count(&inProgressTaskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "done").Count(&doneTaskCount)
 
 	// Bug统计
-	h.db.Model(&model.Bug{}).Where("project_id IN ?", projectIDs).Count(&bugCount)
-	h.db.Model(&model.Bug{}).Where("project_id IN ? AND status = ?", projectIDs, "active").Count(&openBugCount)
-	h.db.Model(&model.Bug{}).Where("project_id IN ? AND status = ?", projectIDs, "resolved").Count(&inProgressBugCount)
-	h.db.Model(&model.Bug{}).Where("project_id IN ? AND status = ?", projectIDs, "resolved").Count(&resolvedBugCount)
+	h.db.Model(&model.Bug{}).Where("project_id = ?", projectID).Count(&bugCount)
+	h.db.Model(&model.Bug{}).Where("project_id = ? AND status = ?", projectID, "active").Count(&openBugCount)
+	h.db.Model(&model.Bug{}).Where("project_id = ? AND status = ?", projectID, "resolved").Count(&inProgressBugCount)
+	h.db.Model(&model.Bug{}).Where("project_id = ? AND status = ?", projectID, "resolved").Count(&resolvedBugCount)
 
 	// 需求统计
-	h.db.Model(&model.Requirement{}).Where("project_id IN ?", projectIDs).Count(&requirementCount)
-	h.db.Model(&model.Requirement{}).Where("project_id IN ? AND status = ?", projectIDs, "active").Count(&inProgressRequirementCount)
-	h.db.Model(&model.Requirement{}).Where("project_id IN ? AND status = ?", projectIDs, "closed").Count(&completedRequirementCount)
+	h.db.Model(&model.Requirement{}).Where("project_id = ?", projectID).Count(&requirementCount)
+	h.db.Model(&model.Requirement{}).Where("project_id = ? AND status = ?", projectID, "active").Count(&inProgressRequirementCount)
+	h.db.Model(&model.Requirement{}).Where("project_id = ? AND status = ?", projectID, "closed").Count(&completedRequirementCount)
 
 	// 成员统计
-	h.db.Model(&model.ProjectMember{}).Where("project_id IN ?", projectIDs).Distinct("user_id").Count(&memberCount)
+	h.db.Model(&model.ProjectMember{}).Where("project_id = ?", projectID).Count(&memberCount)
 
 	return gin.H{
 		"total_tasks":              int(taskCount),
@@ -206,7 +199,6 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		TagIDs      []uint  `json:"tag_ids"`    // 标签ID数组
 		StartDate   *string `json:"start_date"` // 接收字符串格式的日期
 		EndDate     *string `json:"end_date"`   // 接收字符串格式的日期
-		ParentID    *uint   `json:"parent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -243,18 +235,6 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		Status:      req.Status,
 		StartDate:   startDate,
 		EndDate:     endDate,
-		ParentID:    req.ParentID,
-	}
-	if req.ParentID != nil {
-		var parent model.Project
-		if err := h.db.First(&parent, *req.ParentID).Error; err != nil {
-			utils.Error(c, 400, "上级项目不存在")
-			return
-		}
-		if parent.ParentID != nil {
-			utils.Error(c, 400, "最多支持两级项目（一级项目、二级项目），任务为第三级")
-			return
-		}
 	}
 
 	// 关联标签
@@ -339,7 +319,6 @@ func (h *ProjectHandler) UpdateProject(c *gin.Context) {
 		TagIDs      *[]uint `json:"tag_ids"`    // 标签ID数组
 		StartDate   *string `json:"start_date"` // 接收字符串格式的日期
 		EndDate     *string `json:"end_date"`   // 接收字符串格式的日期
-		ParentID    *uint   `json:"parent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -363,29 +342,6 @@ func (h *ProjectHandler) UpdateProject(c *gin.Context) {
 			return
 		}
 		project.Status = *req.Status
-	}
-	if req.ParentID != nil {
-		if *req.ParentID == 0 {
-			project.ParentID = nil
-		} else {
-			newParentID := *req.ParentID
-			if newParentID == project.ID {
-				utils.Error(c, 400, "项目不能以自身作为上级项目")
-				return
-			}
-			var parent model.Project
-			if err := h.db.First(&parent, newParentID).Error; err != nil || parent.ParentID != nil {
-				utils.Error(c, 400, "上级项目不存在或不是一级项目")
-				return
-			}
-			var childCount int64
-			h.db.Model(&model.Project{}).Where("parent_id = ?", project.ID).Count(&childCount)
-			if childCount > 0 {
-				utils.Error(c, 400, "包含子项目的项目不能设为二级项目")
-				return
-			}
-			project.ParentID = &newParentID
-		}
 	}
 
 	// 更新标签关联
@@ -465,11 +421,6 @@ func (h *ProjectHandler) DeleteProject(c *gin.Context) {
 
 	// 检查是否有任务、Bug、需求等关联数据
 	var count int64
-	h.db.Model(&model.Project{}).Where("parent_id = ?", id).Count(&count)
-	if count > 0 {
-		utils.Error(c, 400, "项目下存在子项目，无法删除")
-		return
-	}
 	h.db.Model(&model.Task{}).Where("project_id = ?", id).Count(&count)
 	if count > 0 {
 		utils.Error(c, 400, "项目下存在任务，无法删除")

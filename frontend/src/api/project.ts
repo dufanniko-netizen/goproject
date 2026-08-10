@@ -12,9 +12,6 @@ export interface Project {
   created_at?: string
   updated_at?: string
   members?: ProjectMember[]
-  parent_id?: number
-  parent?: Project
-  children?: Project[]
 }
 
 export interface ProjectStatistics {
@@ -62,7 +59,6 @@ export interface CreateProjectRequest {
   tag_ids?: number[]  // 标签ID数组
   start_date?: string
   end_date?: string
-  parent_id?: number
 }
 
 export interface AddProjectMembersRequest {
