@@ -13,9 +13,9 @@
             </template>
           </a-page-header>
 
-          <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
-            <a-tab-pane key="daily" tab="日报">
-              <a-card :bordered="false" style="margin-bottom: 16px">
+          <a-tabs v-model:activeKey="activeTab" class="report-tabs" @change="handleTabChange">
+            <a-tab-pane key="daily" tab="日报" class="report-tab-pane">
+              <a-card :bordered="false" class="filter-card">
                 <a-form layout="inline" :model="dailySearchForm">
                   <a-form-item label="状态">
                     <a-select
@@ -121,8 +121,8 @@
               </a-card>
             </a-tab-pane>
 
-            <a-tab-pane key="weekly" tab="周报">
-              <a-card :bordered="false" style="margin-bottom: 16px">
+            <a-tab-pane key="weekly" tab="周报" class="report-tab-pane">
+              <a-card :bordered="false" class="filter-card">
                 <a-form layout="inline" :model="weeklySearchForm">
                   <a-form-item label="状态">
                     <a-select
@@ -236,7 +236,7 @@
               </a-card>
             </a-tab-pane>
 
-            <a-tab-pane key="approval">
+            <a-tab-pane key="approval" class="report-tab-pane">
               <template #tab>
                 <a-badge 
                   :count="pendingApprovalCount" 
@@ -246,7 +246,7 @@
                   <span>审批</span>
                 </a-badge>
               </template>
-              <a-card :bordered="false" style="margin-bottom: 16px">
+              <a-card :bordered="false" class="filter-card">
                 <a-form layout="inline" :model="approvalSearchForm">
                   <a-form-item label="审批状态">
                     <a-select
@@ -301,9 +301,9 @@
                 </a-form>
               </a-card>
 
-              <a-card :bordered="false">
+              <a-card :bordered="false" class="table-card">
                 <a-table
-                  :scroll="{ x: 'max-content' }"
+                  :scroll="{ x: 'max-content', y: tableScrollHeight }"
                   :columns="approvalColumns"
                   :data-source="approvalReports"
                   :loading="approvalLoading"
@@ -725,7 +725,7 @@ const dailySearchForm = reactive({
 })
 // 计算表格滚动高度
 const tableScrollHeight = computed(() => {
-  return 'calc(100vh - 500px)'
+  return 'max(560px, calc(100vh - 280px))'
 })
 
 const dailyPagination = reactive({
@@ -1794,6 +1794,36 @@ watch(() => route.query, () => {
   flex-direction: column;
   overflow-y: auto;
   height: 0;
+}
+
+.report-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-tabs :deep(.ant-tabs-nav) {
+  flex: none;
+}
+
+.report-tabs :deep(.ant-tabs-content-holder),
+.report-tabs :deep(.ant-tabs-content),
+.report-tabs :deep(.ant-tabs-tabpane-active) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.report-tab-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.filter-card {
+  flex: none;
+  margin-bottom: 16px;
 }
 
 .table-card {
