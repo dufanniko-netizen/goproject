@@ -6,10 +6,14 @@
         <div class="content-inner">
           <a-page-header title="任务管理">
             <template #extra>
-              <a-button type="primary" @click="handleCreate">
-                <template #icon><PlusOutlined /></template>
-                新增任务
-              </a-button>
+              <a-space>
+                <span>分类管理</span>
+                <a-switch v-model:checked="showGroupNodes" @change="handleGroupModeChange" />
+                <a-button type="primary" @click="handleCreate">
+                  <template #icon><PlusOutlined /></template>
+                  新增任务
+                </a-button>
+              </a-space>
             </template>
           </a-page-header>
 
@@ -107,22 +111,25 @@
               })"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'title'">
-                  <span :style="{ paddingLeft: `${((record.level || 1) - 1) * 24}px` }">
-                    <span v-if="(record.level || 1) > 1" style="color: #999">└ </span>
-                    {{ record.title }}
-                    <a-tag v-if="(record.level || 1) > 1" style="margin-left: 8px" color="blue">
-                      {{ record.level }}级
-                    </a-tag>
-                  </span>
+                <template v-if="column.key === 'level1'">
+                  {{ getLevelTitle(record, 1) }}
+                </template>
+                <template v-else-if="column.key === 'level2'">
+                  {{ getLevelTitle(record, 2) }}
+                </template>
+                <template v-else-if="column.key === 'specific'">
+                  <span v-if="record.node_type !== 'group'">{{ record.title }}</span>
+                  <a-tag v-else color="geekblue">分类</a-tag>
                 </template>
                 <template v-else-if="column.key === 'status'">
-                  <a-tag :color="getStatusColor(record.status)">
+                  <span v-if="record.node_type === 'group'">-</span>
+                  <a-tag v-else :color="getStatusColor(record.status)">
                     {{ getStatusText(record.status) }}
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'priority'">
-                  <a-tag :color="getPriorityColor(record.priority)">
+                  <span v-if="record.node_type === 'group'">-</span>
+                  <a-tag v-else :color="getPriorityColor(record.priority)">
                     {{ getPriorityText(record.priority) }}
                   </a-tag>
                 </template>
@@ -133,20 +140,23 @@
                   {{ record.requirement?.title || '-' }}
                 </template>
                 <template v-else-if="column.key === 'assignee'">
-                  {{ record.assignee ? `${record.assignee.username}${record.assignee.nickname ? `(${record.assignee.nickname})` : ''}` : '-' }}
+                  {{ record.node_type === 'group' ? '-' : (record.assignee ? `${record.assignee.username}${record.assignee.nickname ? `(${record.assignee.nickname})` : ''}` : '-') }}
                 </template>
                 <template v-else-if="column.key === 'progress'">
-                  <a-progress :percent="record.progress" :status="record.status === 'done' ? 'success' : 'active'" />
+                  <span v-if="record.node_type === 'group'">-</span>
+                  <a-progress v-else :percent="record.progress" :status="record.status === 'done' ? 'success' : 'active'" />
                 </template>
                 <template v-else-if="column.key === 'hours'">
-                  <div>
+                  <span v-if="record.node_type === 'group'">-</span>
+                  <div v-else>
                     <div v-if="record.estimated_hours">预估: {{ record.estimated_hours.toFixed(2) }}h</div>
                     <div v-if="record.actual_hours">实际: {{ record.actual_hours.toFixed(2) }}h</div>
                     <span v-if="!record.estimated_hours && !record.actual_hours">-</span>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'dates'">
-                  <div>
+                  <span v-if="record.node_type === 'group'">-</span>
+                  <div v-else>
                     <div v-if="record.start_date">开始: {{ formatDate(record.start_date) }}</div>
                     <div v-if="record.end_date">结束: {{ formatDate(record.end_date) }}</div>
                     <div v-if="record.due_date" :style="{ color: isOverdue(record.due_date, record.status) ? 'red' : '' }">
@@ -159,13 +169,21 @@
                 </template>
                 <template v-else-if="column.key === 'action'">
                   <a-space @click.stop>
+                    <a-button
+                      v-if="record.node_type === 'group' && (record.level || 1) < 3"
+                      type="link"
+                      size="small"
+                      @click.stop="handleCreateChild(record)"
+                    >
+                      添加下级
+                    </a-button>
                     <a-button type="link" size="small" @click.stop="handleEdit(record)">
                       编辑
                     </a-button>
-                    <a-button type="link" size="small" @click.stop="handleUpdateProgress(record)">
+                    <a-button v-if="record.node_type !== 'group'" type="link" size="small" @click.stop="handleUpdateProgress(record)">
                       进度
                     </a-button>
-                    <a-dropdown>
+                    <a-dropdown v-if="record.node_type !== 'group'">
                       <a-button type="link" size="small">
                         状态 <DownOutlined />
                       </a-button>
@@ -258,6 +276,12 @@
             </a-select-option>
           </a-select>
         </a-form-item>
+        <a-alert
+          :message="formTaskLevel === 3 ? '当前将创建具体执行任务，会进入甘特图' : `当前将创建${formTaskLevel === 1 ? '一级' : '二级'}任务分类，不进入甘特图`"
+          :type="formTaskLevel === 3 ? 'success' : 'info'"
+          show-icon
+          style="margin-bottom: 16px"
+        />
         <a-form-item label="关联需求" name="requirement_id">
           <a-select
             v-model:value="formData.requirement_id"
@@ -716,6 +740,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
 const tasks = ref<Task[]>([])
+const showGroupNodes = ref(false)
 const projects = ref<Project[]>([])
 const requirements = ref<Requirement[]>([])
 const users = ref<User[]>([])
@@ -763,7 +788,9 @@ const tableScrollHeight = computed(() => {
 })
 
 const columns = [
-  { title: '任务标题', dataIndex: 'title', key: 'title', ellipsis: true },
+  { title: '一级任务', key: 'level1', width: 180, ellipsis: true },
+  { title: '二级任务', key: 'level2', width: 200, ellipsis: true },
+  { title: '具体任务', key: 'specific', width: 240, ellipsis: true },
   { title: '项目', key: 'project', width: 120 },
   { title: '需求', key: 'requirement', width: 150 },
   { title: '状态', key: 'status', width: 100 },
@@ -775,6 +802,16 @@ const columns = [
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 300, fixed: 'right' as const }
 ]
+
+const getLevelTitle = (task: Task, level: number) => {
+  if ((task.level || 1) === level && task.node_type === 'group') return task.title
+  if (level === 2 && task.parent?.level === 2) return task.parent.title
+  if (level === 1) {
+    if (task.parent?.level === 1) return task.parent.title
+    if (task.parent?.parent?.level === 1) return task.parent.parent.title
+  }
+  return '-'
+}
 
 const modalVisible = ref(false)
 const modalTitle = ref('新增任务')
@@ -798,6 +835,12 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   work_date: undefined,
   dependency_ids: [],
   attachment_ids: [] as number[]
+})
+
+const formTaskLevel = computed(() => {
+  if (!formData.parent_id) return 1
+  const parent = availableTasks.value.find(task => task.id === formData.parent_id)
+  return Math.min(3, (parent?.level || 1) + 1)
 })
 
 const taskAttachments = ref<Attachment[]>([]) // 任务附件列表
@@ -867,6 +910,9 @@ const loadTasks = async () => {
     }
     if (searchForm.assignee_id) {
       params.assignee_id = searchForm.assignee_id
+    }
+    if (!showGroupNodes.value) {
+      params.node_type = 'task'
     }
     const response = await getTasks(params)
     tasks.value = response.list
@@ -1031,6 +1077,18 @@ const handleCreate = () => {
   if (formData.project_id) {
     loadTasksForProject()
   }
+}
+
+const handleGroupModeChange = () => {
+  pagination.current = 1
+  loadTasks()
+}
+
+const handleCreateChild = (parent: Task) => {
+  handleCreate()
+  formData.project_id = parent.project_id
+  formData.parent_id = parent.id
+  loadTasksForProject()
 }
 
 // 编辑
