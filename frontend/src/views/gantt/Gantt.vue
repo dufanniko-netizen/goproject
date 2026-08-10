@@ -468,11 +468,11 @@ const handleViewTask = () => {
 const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
     wait: 'orange',
-    doing: 'blue',
+    doing: 'gold',
     done: 'green',
     pause: 'purple',
     cancel: 'red',
-    closed: 'default'
+    closed: 'red'
   }
   return colors[status] || 'default'
 }
@@ -481,9 +481,11 @@ const getStatusColor = (status: string) => {
 const getStatusText = (status: string) => {
   const texts: Record<string, string> = {
     wait: '未开始',
-    in_progress: '进行中',
+    doing: '进行中',
     done: '已完成',
-    cancelled: '已取消'
+    pause: '已暂停',
+    cancel: '已取消',
+    closed: '已延期'
   }
   return texts[status] || status
 }
@@ -827,7 +829,8 @@ onUnmounted(() => {
 }
 
 .gantt-bar.status-doing {
-  background: #1890ff;
+  background: #fadb14;
+  color: #5c3b00;
 }
 
 .gantt-bar.status-done {
@@ -837,6 +840,10 @@ onUnmounted(() => {
 .gantt-bar.status-cancel {
   background: #ff4d4f;
   opacity: 0.6;
+}
+
+.gantt-bar.status-closed {
+  background: #ff4d4f;
 }
 
 .gantt-bar.priority-urgent {

@@ -194,7 +194,7 @@
                           <a-menu-item key="done">已完成</a-menu-item>
                           <a-menu-item key="pause">已暂停</a-menu-item>
                           <a-menu-item key="cancel">已取消</a-menu-item>
-                          <a-menu-item key="closed">已关闭</a-menu-item>
+                          <a-menu-item key="closed">已延期</a-menu-item>
                         </a-menu>
                       </template>
                     </a-dropdown>
@@ -308,7 +308,7 @@
             <a-select-option value="done">已完成</a-select-option>
             <a-select-option value="pause">已暂停</a-select-option>
             <a-select-option value="cancel">已取消</a-select-option>
-            <a-select-option value="closed">已关闭</a-select-option>
+            <a-select-option value="closed">已延期</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="优先级" name="priority">
@@ -512,7 +512,7 @@
                     <a-menu-item key="done">已完成</a-menu-item>
                     <a-menu-item key="pause">已暂停</a-menu-item>
                     <a-menu-item key="cancel">已取消</a-menu-item>
-                    <a-menu-item key="closed">已关闭</a-menu-item>
+                    <a-menu-item key="closed">已延期</a-menu-item>
                   </a-menu>
                 </template>
               </a-dropdown>
@@ -1292,11 +1292,11 @@ const handleProgressCancel = () => {
 const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
     wait: 'orange',
-    doing: 'blue',
+    doing: 'gold',
     done: 'green',
     pause: 'purple',
     cancel: 'red',
-    closed: 'default'
+    closed: 'red'
   }
   return colors[status] || 'default'
 }
@@ -1309,7 +1309,7 @@ const getStatusText = (status: string) => {
     done: '已完成',
     pause: '已暂停',
     cancel: '已取消',
-    closed: '已关闭'
+    closed: '已延期'
   }
   return texts[status] || status
 }
