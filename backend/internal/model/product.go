@@ -20,6 +20,10 @@ type Project struct {
 	StartDate   *time.Time `json:"start_date"`                      // 开始日期
 	EndDate     *time.Time `json:"end_date"`                        // 结束日期
 
+	ParentID *uint     `gorm:"index" json:"parent_id"`
+	Parent   *Project  `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
+	Children []Project `gorm:"foreignKey:ParentID" json:"children,omitempty"`
+
 	Members      []ProjectMember `gorm:"foreignKey:ProjectID" json:"members,omitempty"`
 	Tasks        []Task          `gorm:"foreignKey:ProjectID" json:"tasks,omitempty"`
 	Bugs         []Bug           `gorm:"foreignKey:ProjectID" json:"bugs,omitempty"`

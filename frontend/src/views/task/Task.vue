@@ -13,7 +13,12 @@
             </template>
           </a-page-header>
 
-          <a-card :bordered="false" style="margin-bottom: 16px">
+          <a-card
+            :bordered="false"
+            class="search-card"
+            :class="{ 'search-card-collapsed': !searchFormVisible }"
+            style="margin-bottom: 16px"
+          >
             <template #title>
               <a-space>
                 <span>搜索条件</span>
@@ -50,7 +55,7 @@
                         :key="project.id"
                         :value="project.id"
                       >
-                        {{ project.name }}
+                        {{ getProjectLabel(project) }}
                       </a-select-option>
                     </a-select>
                   </a-form-item>
@@ -113,7 +118,7 @@
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'project'">
-                  {{ record.project?.name || '-' }}
+                  {{ record.project ? getProjectLabel(record.project) : '-' }}
                 </template>
                 <template v-else-if="column.key === 'requirement'">
                   {{ record.requirement?.title || '-' }}
@@ -222,7 +227,7 @@
               :key="project.id"
               :value="project.id"
             >
-              {{ project.name }}
+              {{ getProjectLabel(project) }}
             </a-select-option>
           </a-select>
         </a-form-item>
@@ -727,7 +732,7 @@ const pagination = reactive({
 
 // 计算表格滚动高度
 const tableScrollHeight = computed(() => {
-  return 'calc(100vh - 500px)'
+  return 'max(320px, calc(100vh - 420px))'
 })
 
 const columns = [
@@ -854,6 +859,10 @@ const loadProjects = async () => {
   } catch (error: any) {
     console.error('加载项目列表失败:', error)
   }
+}
+
+const getProjectLabel = (project: Project) => {
+  return project.parent ? `${project.parent.name} / ${project.name}` : project.name
 }
 
 // 加载用户列表
@@ -1551,6 +1560,11 @@ onMounted(async () => {
   flex-direction: column;
   overflow-y: auto;
   height: 0;
+}
+
+/* 折叠搜索条件时移除空白正文，为任务表格留出更多空间 */
+.search-card-collapsed :deep(.ant-card-body) {
+  display: none;
 }
 
 .table-card {

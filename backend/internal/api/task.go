@@ -21,7 +21,7 @@ func NewTaskHandler(db *gorm.DB) *TaskHandler {
 // GetTasks 获取任务列表
 func (h *TaskHandler) GetTasks(c *gin.Context) {
 	var tasks []model.Task
-	query := h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies")
+	query := h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies")
 
 	// 权限过滤：普通用户只能看到自己创建或参与的任务
 	query = utils.FilterTasksByUser(h.db, c, query)
@@ -114,7 +114,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	var task model.Task
-	if err := h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, id).Error; err != nil {
+	if err := h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, id).Error; err != nil {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
@@ -291,7 +291,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	// 记录创建操作
 	if userID, exists := c.Get("user_id"); exists {
@@ -530,7 +530,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	// 记录编辑操作和字段变更
 	userID, exists := c.Get("user_id")
@@ -630,7 +630,7 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	utils.Success(c, task)
 }
@@ -746,7 +746,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	// 如果 req.Progress != nil，说明用户手动设置了进度，已经在上面的代码中设置了，不需要再计算
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	utils.Success(c, task)
 }
