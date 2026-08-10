@@ -492,9 +492,11 @@ func (h *ProjectHandler) GetProjectGantt(c *gin.Context) {
 
 	// 获取项目的所有任务（包含依赖关系）
 	var tasks []model.Task
-	if err := h.db.Where("project_id = ?", projectID).
+	if err := h.db.Where("project_id = ? AND node_type = ?", projectID, "task").
 		Preload("Dependencies").
 		Preload("Assignee").
+		Preload("Parent").
+		Preload("Parent.Parent").
 		Order("created_at ASC").
 		Find(&tasks).Error; err != nil {
 		utils.Error(c, utils.CodeError, "查询任务失败")
@@ -525,6 +527,12 @@ func (h *ProjectHandler) GetProjectGantt(c *gin.Context) {
 			Status:         task.Status,
 			Priority:       task.Priority,
 			EstimatedHours: task.EstimatedHours,
+		}
+		if task.Parent != nil {
+			ganttTask.Title = task.Parent.Title + " / " + task.Title
+			if task.Parent.Parent != nil {
+				ganttTask.Title = task.Parent.Parent.Title + " / " + ganttTask.Title
+			}
 		}
 
 		// 格式化日期

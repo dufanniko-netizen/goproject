@@ -55,6 +55,9 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	if creatorID := c.Query("creator_id"); creatorID != "" {
 		query = query.Where("creator_id = ?", creatorID)
 	}
+	if nodeType := c.Query("node_type"); nodeType != "" {
+		query = query.Where("node_type = ?", nodeType)
+	}
 
 	// 分页
 	page := utils.GetPage(c)
@@ -93,6 +96,9 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	// 创建人筛选
 	if creatorID := c.Query("creator_id"); creatorID != "" {
 		countQuery = countQuery.Where("creator_id = ?", creatorID)
+	}
+	if nodeType := c.Query("node_type"); nodeType != "" {
+		countQuery = countQuery.Where("node_type = ?", nodeType)
 	}
 
 	countQuery.Count(&total)
@@ -211,6 +217,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	level := 1
+	nodeType := "group"
 	if req.ParentID != nil {
 		var parent model.Task
 		if err := h.db.First(&parent, *req.ParentID).Error; err != nil {
@@ -226,6 +233,11 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 			return
 		}
 		level = parent.Level + 1
+		if level == 3 {
+			nodeType = "task"
+		}
+		// 只要拥有下级节点，父节点就是分类，不再作为执行任务参与甘特图。
+		h.db.Model(&parent).Update("node_type", "group")
 	}
 
 	// 如果指定了需求，验证需求是否存在且属于同一项目
@@ -284,6 +296,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		EstimatedHours: req.EstimatedHours,
 		ParentID:       req.ParentID,
 		Level:          level,
+		NodeType:       nodeType,
 	}
 
 	if err := h.db.Create(&task).Error; err != nil {
@@ -425,6 +438,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		if *req.ParentID == 0 {
 			task.ParentID = nil
 			task.Level = 1
+			task.NodeType = "group"
 		} else {
 			if *req.ParentID == task.ID {
 				utils.Error(c, 400, "任务不能以自身作为父任务")
@@ -441,6 +455,12 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			}
 			task.ParentID = req.ParentID
 			task.Level = parent.Level + 1
+			if task.Level == 3 {
+				task.NodeType = "task"
+			} else {
+				task.NodeType = "group"
+			}
+			h.db.Model(&parent).Update("node_type", "group")
 		}
 	}
 	if req.RequirementID != nil {

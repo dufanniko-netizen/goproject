@@ -25,6 +25,7 @@ export interface Task {
   parent?: Task
   children?: Task[]
   level: number
+  node_type?: 'group' | 'task'
   created_at?: string
   updated_at?: string
 }
@@ -74,6 +75,7 @@ export const getTasks = async (params?: {
   priority?: string
   assignee_id?: number
   creator_id?: number
+  node_type?: 'group' | 'task'
   page?: number
   size?: number
 }): Promise<TaskListResponse> => {

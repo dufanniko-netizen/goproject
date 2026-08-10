@@ -25,6 +25,7 @@ type Task struct {
 	Parent   *Task  `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
 	Children []Task `gorm:"foreignKey:ParentID" json:"children,omitempty"`
 	Level    int    `gorm:"default:1;not null" json:"level"`
+	NodeType string `gorm:"size:20;default:'task';not null;index" json:"node_type"` // group: 分类节点，task: 具体执行任务
 
 	RequirementID *uint       `gorm:"index" json:"requirement_id"`
 	Requirement   *Requirement `gorm:"foreignKey:RequirementID" json:"requirement,omitempty"`
