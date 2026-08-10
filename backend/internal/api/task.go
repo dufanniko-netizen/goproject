@@ -21,7 +21,7 @@ func NewTaskHandler(db *gorm.DB) *TaskHandler {
 // GetTasks 获取任务列表
 func (h *TaskHandler) GetTasks(c *gin.Context) {
 	var tasks []model.Task
-	query := h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies")
+	query := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies")
 
 	// 权限过滤：普通用户只能看到自己创建或参与的任务
 	query = utils.FilterTasksByUser(h.db, c, query)
@@ -114,7 +114,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	var task model.Task
-	if err := h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, id).Error; err != nil {
+	if err := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, id).Error; err != nil {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
@@ -144,6 +144,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		Progress       int       `json:"progress"`
 		EstimatedHours *float64  `json:"estimated_hours"`
 		DependencyIDs  []uint    `json:"dependency_ids"`
+		ParentID       *uint     `json:"parent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -209,6 +210,24 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
+	level := 1
+	if req.ParentID != nil {
+		var parent model.Task
+		if err := h.db.First(&parent, *req.ParentID).Error; err != nil {
+			utils.Error(c, 400, "父任务不存在")
+			return
+		}
+		if parent.ProjectID != req.ProjectID {
+			utils.Error(c, 400, "父任务必须属于同一项目")
+			return
+		}
+		if parent.Level >= 3 {
+			utils.Error(c, 400, "任务最多支持三级")
+			return
+		}
+		level = parent.Level + 1
+	}
+
 	// 如果指定了需求，验证需求是否存在且属于同一项目
 	if req.RequirementID != nil {
 		var requirement model.Requirement
@@ -263,6 +282,8 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		DueDate:        dueDate,
 		Progress:       req.Progress,
 		EstimatedHours: req.EstimatedHours,
+		ParentID:       req.ParentID,
+		Level:          level,
 	}
 
 	if err := h.db.Create(&task).Error; err != nil {
@@ -291,7 +312,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	// 记录创建操作
 	if userID, exists := c.Get("user_id"); exists {
@@ -338,6 +359,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		ActualHours    *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
 		WorkDate       *string  `json:"work_date"`     // 工作日期（YYYY-MM-DD），用于资源分配
 		DependencyIDs  *[]uint  `json:"dependency_ids"`
+		ParentID       *uint    `json:"parent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -390,6 +412,36 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			return
 		}
 		task.ProjectID = *req.ProjectID
+	}
+	if req.ParentID != nil {
+		var childCount int64
+		h.db.Model(&model.Task{}).Where("parent_id = ?", task.ID).Count(&childCount)
+		parentChanged := (task.ParentID == nil && *req.ParentID != 0) ||
+			(task.ParentID != nil && *task.ParentID != *req.ParentID)
+		if parentChanged && childCount > 0 {
+			utils.Error(c, 400, "该任务下存在子任务，请先调整子任务后再修改父任务")
+			return
+		}
+		if *req.ParentID == 0 {
+			task.ParentID = nil
+			task.Level = 1
+		} else {
+			if *req.ParentID == task.ID {
+				utils.Error(c, 400, "任务不能以自身作为父任务")
+				return
+			}
+			var parent model.Task
+			if err := h.db.First(&parent, *req.ParentID).Error; err != nil {
+				utils.Error(c, 400, "父任务不存在")
+				return
+			}
+			if parent.ProjectID != task.ProjectID || parent.Level >= 3 {
+				utils.Error(c, 400, "父任务必须属于同一项目且只能选择一、二级任务")
+				return
+			}
+			task.ParentID = req.ParentID
+			task.Level = parent.Level + 1
+		}
 	}
 	if req.RequirementID != nil {
 		// 验证需求是否存在且属于同一项目
@@ -530,7 +582,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	// 记录编辑操作和字段变更
 	userID, exists := c.Get("user_id")
@@ -564,6 +616,11 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 
 	// 检查是否有其他任务依赖此任务
 	var count int64
+	h.db.Model(&model.Task{}).Where("parent_id = ?", id).Count(&count)
+	if count > 0 {
+		utils.Error(c, 400, "任务下存在子任务，无法删除")
+		return
+	}
 	h.db.Model(&model.TaskDependency{}).Where("dependency_id = ?", id).Count(&count)
 	if count > 0 {
 		utils.Error(c, 400, "有其他任务依赖此任务，无法删除")
@@ -630,7 +687,7 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	utils.Success(c, task)
 }
@@ -746,7 +803,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	// 如果 req.Progress != nil，说明用户手动设置了进度，已经在上面的代码中设置了，不需要再计算
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Project.Parent").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
 
 	utils.Success(c, task)
 }

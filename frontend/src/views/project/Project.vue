@@ -91,10 +91,7 @@
                   })"
                 >
                   <template #bodyCell="{ column, record }">
-                    <template v-if="column.key === 'parent'">
-                      {{ record.parent?.name || '一级项目' }}
-                    </template>
-                    <template v-else-if="column.key === 'status'">
+                    <template v-if="column.key === 'status'">
                       <a-tag :color="getProjectStatusColor(record.status)">
                         {{ getProjectStatusText(record.status) }}
                       </a-tag>
@@ -162,21 +159,6 @@
         </a-form-item>
         <a-form-item label="项目编码" name="code">
           <a-input v-model:value="projectFormData.code" placeholder="请输入项目编码" />
-        </a-form-item>
-        <a-form-item label="上级项目">
-          <a-select
-            v-model:value="projectFormData.parent_id"
-            placeholder="不选择则创建一级项目"
-            allow-clear
-          >
-            <a-select-option
-              v-for="project in allProjectsForSelect.filter(item => !item.parent_id && item.id !== projectFormData.id)"
-              :key="project.id"
-              :value="project.id"
-            >
-              {{ project.name }}
-            </a-select-option>
-          </a-select>
         </a-form-item>
         <a-form-item label="标签">
           <a-space style="width: 100%" direction="vertical">
@@ -792,7 +774,6 @@ const tableScrollHeight = computed(() => {
 
 const projectColumns = [
   { title: '项目名称', dataIndex: 'name', key: 'name' },
-  { title: '上级项目', key: 'parent', width: 180 },
   { title: '项目编码', dataIndex: 'code', key: 'code' },
   { title: '标签', key: 'tags', width: 200 },
   { title: '开始日期', dataIndex: 'start_date', key: 'start_date', width: 120 },
@@ -996,7 +977,6 @@ const handleCreateProject = () => {
     projectFormData.code = ''
     projectFormData.description = ''
     projectFormData.status = 'wait'
-    projectFormData.parent_id = undefined
     // 从 localStorage 恢复最后选择的标签
     const lastTagIds = getLastSelected<number[]>('last_selected_project_tags_form')
     projectFormData.tag_ids = lastTagIds || []
@@ -1039,7 +1019,6 @@ const handleEditProject = async (record: Project) => {
     code: record.code,
     description: record.description || '',
     status: record.status,
-    parent_id: record.parent_id,
     tag_ids: record.tags ? record.tags.map(tag => tag.id) : []
   })
   if (record.start_date) {
@@ -1075,7 +1054,6 @@ const handleProjectSubmit = async () => {
       status: projectFormData.status,
       tag_ids: projectFormData.tag_ids || []
     }
-    data.parent_id = projectFormData.parent_id || 0
     if (projectFormData.start_date) {
       data.start_date = projectFormData.start_date.format('YYYY-MM-DD')
     }

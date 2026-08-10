@@ -21,6 +21,10 @@ export interface Task {
   estimated_hours?: number
   actual_hours?: number
   dependencies?: Task[]
+  parent_id?: number
+  parent?: Task
+  children?: Task[]
+  level: number
   created_at?: string
   updated_at?: string
 }
@@ -48,6 +52,7 @@ export interface CreateTaskRequest {
   actual_hours?: number
   work_date?: string
   dependency_ids?: number[]
+  parent_id?: number
 }
 
 export interface UpdateTaskStatusRequest {

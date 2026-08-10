@@ -55,7 +55,7 @@
                         :key="project.id"
                         :value="project.id"
                       >
-                        {{ getProjectLabel(project) }}
+                        {{ project.name }}
                       </a-select-option>
                     </a-select>
                   </a-form-item>
@@ -107,7 +107,16 @@
               })"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'status'">
+                <template v-if="column.key === 'title'">
+                  <span :style="{ paddingLeft: `${((record.level || 1) - 1) * 24}px` }">
+                    <span v-if="(record.level || 1) > 1" style="color: #999">└ </span>
+                    {{ record.title }}
+                    <a-tag v-if="(record.level || 1) > 1" style="margin-left: 8px" color="blue">
+                      {{ record.level }}级
+                    </a-tag>
+                  </span>
+                </template>
+                <template v-else-if="column.key === 'status'">
                   <a-tag :color="getStatusColor(record.status)">
                     {{ getStatusText(record.status) }}
                   </a-tag>
@@ -118,7 +127,7 @@
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'project'">
-                  {{ record.project ? getProjectLabel(record.project) : '-' }}
+                  {{ record.project?.name || '-' }}
                 </template>
                 <template v-else-if="column.key === 'requirement'">
                   {{ record.requirement?.title || '-' }}
@@ -227,7 +236,25 @@
               :key="project.id"
               :value="project.id"
             >
-              {{ getProjectLabel(project) }}
+              {{ project.name }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="父任务" name="parent_id">
+          <a-select
+            v-model:value="formData.parent_id"
+            placeholder="不选择则创建一级任务"
+            allow-clear
+            show-search
+            :filter-option="filterTaskOption"
+            :disabled="!formData.project_id"
+          >
+            <a-select-option
+              v-for="task in availableTasks.filter(item => (item.level || 1) < 3)"
+              :key="task.id"
+              :value="task.id"
+            >
+              {{ `${'　'.repeat((task.level || 1) - 1)}${task.title}（${task.level || 1}级）` }}
             </a-select-option>
           </a-select>
         </a-form-item>
@@ -759,6 +786,7 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   status: 'wait',
   priority: 'medium',
   project_id: 0,
+  parent_id: undefined,
   requirement_id: undefined,
   assignee_id: undefined,
   start_date: undefined,
@@ -861,10 +889,6 @@ const loadProjects = async () => {
   }
 }
 
-const getProjectLabel = (project: Project) => {
-  return project.parent ? `${project.parent.name} / ${project.name}` : project.name
-}
-
 // 加载用户列表
 const loadUsers = async () => {
   try {
@@ -883,7 +907,7 @@ const loadTasksForProject = async () => {
   }
   taskLoading.value = true
   try {
-    const response = await getTasks({ project_id: formData.project_id })
+    const response = await getTasks({ project_id: formData.project_id, size: 1000 })
     // 排除当前任务（如果是编辑模式）
     availableTasks.value = response.list.filter(t => t.id !== formData.id)
   } catch (error: any) {
@@ -895,6 +919,7 @@ const loadTasksForProject = async () => {
 
 // 监听项目变化，重新加载任务和需求
 watch(() => formData.project_id, () => {
+  formData.parent_id = undefined
   formData.dependency_ids = []
   formData.requirement_id = undefined
   if (formData.project_id) {
@@ -950,6 +975,7 @@ const handleFormProjectChange = (value: number | undefined) => {
   saveLastSelected('last_selected_task_project_form', value || 0)
   // 原有的 handleProjectChange 逻辑
   formData.requirement_id = undefined
+  formData.parent_id = undefined
   loadRequirementsForProject()
 }
 
@@ -981,6 +1007,7 @@ const handleCreate = () => {
   formData.description = ''
   formData.status = 'wait'
   formData.priority = 'medium'
+  formData.parent_id = undefined
   // 如果有路由查询参数中的 project_id，使用它；否则从 localStorage 恢复最后选择的项目
   const projectIdFromQuery = route.query.project_id
   if (projectIdFromQuery) {
@@ -1015,6 +1042,7 @@ const handleEdit = async (record: Task) => {
   formData.status = record.status
   formData.priority = record.priority
   formData.project_id = record.project_id
+  formData.parent_id = record.parent_id
   formData.requirement_id = record.requirement_id
   formData.assignee_id = record.assignee_id
   // 解析日期，确保日期有效
@@ -1093,6 +1121,8 @@ const handleSubmit = async () => {
       status: formData.status,
       priority: formData.priority,
       project_id: formData.project_id,
+      // 编辑时用 0 明确表示清除父任务；创建时不选父任务则省略该字段
+      parent_id: formData.id ? (formData.parent_id || 0) : formData.parent_id,
       requirement_id: formData.requirement_id,
       assignee_id: formData.assignee_id,
       start_date: formData.start_date && formData.start_date.isValid() ? formData.start_date.format('YYYY-MM-DD') : undefined,
