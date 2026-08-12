@@ -17,24 +17,42 @@
             </template>
           </a-page-header>
 
-          <a-card
-            :bordered="false"
-            class="search-card"
-            :class="{ 'search-card-collapsed': !searchFormVisible }"
-            style="margin-bottom: 16px"
-          >
-            <template #title>
-              <a-space>
-                <span>搜索条件</span>
-                <a-button type="text" size="small" @click="toggleSearchForm">
-                  <template #icon>
-                    <UpOutlined v-if="searchFormVisible" />
-                    <DownOutlined v-else />
-                  </template>
-                  {{ searchFormVisible ? '收起' : '展开' }}
-                </a-button>
-              </a-space>
-            </template>
+          <div class="task-toolbar">
+            <a-space>
+              <a-button type="text" @click="toggleSearchForm">
+                <template #icon><FilterOutlined /></template>
+                筛选
+                <UpOutlined v-if="searchFormVisible" />
+                <DownOutlined v-else />
+              </a-button>
+              <a-button v-if="showGroupNodes" type="text" @click="toggleAllGroups">
+                {{ allGroupsCollapsed ? '全部展开' : '全部折叠' }}
+              </a-button>
+            </a-space>
+            <a-popover trigger="click" placement="bottomRight">
+              <template #content>
+                <div class="column-settings">
+                  <div class="column-settings-title">显示列</div>
+                  <a-checkbox-group v-model:value="visibleColumnKeys">
+                    <a-checkbox
+                      v-for="column in configurableColumns"
+                      :key="column.key"
+                      :value="column.key"
+                    >
+                      {{ column.title }}
+                    </a-checkbox>
+                  </a-checkbox-group>
+                  <a-button type="link" size="small" @click="resetVisibleColumns">恢复默认</a-button>
+                </div>
+              </template>
+              <a-button type="text">
+                <template #icon><SettingOutlined /></template>
+                列设置
+              </a-button>
+            </a-popover>
+          </div>
+
+          <a-card v-show="searchFormVisible" :bordered="false" class="search-card">
             <a-form v-show="searchFormVisible" layout="inline" :model="searchForm">
               <a-form-item label="关键词">
                 <a-input
@@ -99,7 +117,7 @@
           <a-card :bordered="false" class="table-card">
             <a-table
               :columns="columns"
-              :data-source="tasks"
+              :data-source="visibleTasks"
               :loading="loading"
               :pagination="pagination"
               :scroll="{ x: 'max-content', y: tableScrollHeight }"
@@ -112,9 +130,29 @@
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'level1'">
+                  <a-button
+                    v-if="record.node_type === 'group' && record.level === 1"
+                    type="text"
+                    size="small"
+                    class="group-toggle"
+                    @click.stop="toggleGroup(record.id)"
+                  >
+                    <RightOutlined v-if="collapsedGroupIds.has(record.id)" />
+                    <DownOutlined v-else />
+                  </a-button>
                   {{ getLevelTitle(record, 1) }}
                 </template>
                 <template v-else-if="column.key === 'level2'">
+                  <a-button
+                    v-if="record.node_type === 'group' && record.level === 2"
+                    type="text"
+                    size="small"
+                    class="group-toggle"
+                    @click.stop="toggleGroup(record.id)"
+                  >
+                    <RightOutlined v-if="collapsedGroupIds.has(record.id)" />
+                    <DownOutlined v-else />
+                  </a-button>
                   {{ getLevelTitle(record, 2) }}
                 </template>
                 <template v-else-if="column.key === 'specific'">
@@ -168,42 +206,31 @@
                   {{ formatDateTime(record.created_at) }}
                 </template>
                 <template v-else-if="column.key === 'action'">
-                  <a-space @click.stop>
-                    <a-button
-                      v-if="record.node_type === 'group' && (record.level || 1) < 3"
-                      type="link"
-                      size="small"
-                      @click.stop="handleCreateChild(record)"
-                    >
-                      添加下级
-                    </a-button>
+                  <a-space :size="0" @click.stop>
                     <a-button type="link" size="small" @click.stop="handleEdit(record)">
                       编辑
                     </a-button>
-                    <a-button v-if="record.node_type !== 'group'" type="link" size="small" @click.stop="handleUpdateProgress(record)">
-                      进度
-                    </a-button>
-                    <a-dropdown v-if="record.node_type !== 'group'">
-                      <a-button type="link" size="small">
-                        状态 <DownOutlined />
+                    <a-dropdown>
+                      <a-button type="link" size="small" @click.stop>
+                        更多 <DownOutlined />
                       </a-button>
                       <template #overlay>
-                        <a-menu @click="(e: any) => handleStatusChange(record.id, e.key as string)">
-                          <a-menu-item key="wait">未开始</a-menu-item>
-                          <a-menu-item key="doing">进行中</a-menu-item>
-                          <a-menu-item key="done">已完成</a-menu-item>
-                          <a-menu-item key="pause">已暂停</a-menu-item>
-                          <a-menu-item key="cancel">已取消</a-menu-item>
-                          <a-menu-item key="closed">已延期</a-menu-item>
+                        <a-menu @click="(e: any) => handleActionMenu(record, e.key as string)">
+                          <a-menu-item v-if="record.node_type === 'group' && (record.level || 1) < 3" key="add-child">添加下级</a-menu-item>
+                          <a-menu-item v-if="record.node_type !== 'group'" key="progress">更新进度</a-menu-item>
+                          <a-sub-menu v-if="record.node_type !== 'group'" key="status" title="修改状态">
+                            <a-menu-item key="status:wait">未开始</a-menu-item>
+                            <a-menu-item key="status:doing">进行中</a-menu-item>
+                            <a-menu-item key="status:done">已完成</a-menu-item>
+                            <a-menu-item key="status:pause">已暂停</a-menu-item>
+                            <a-menu-item key="status:cancel">已取消</a-menu-item>
+                            <a-menu-item key="status:closed">已延期</a-menu-item>
+                          </a-sub-menu>
+                          <a-menu-divider />
+                          <a-menu-item key="delete" danger>删除</a-menu-item>
                         </a-menu>
                       </template>
                     </a-dropdown>
-                    <a-popconfirm
-                      title="确定要删除这个任务吗？"
-                      @confirm="handleDelete(record.id)"
-                    >
-                      <a-button type="link" size="small" danger @click.stop>删除</a-button>
-                    </a-popconfirm>
                   </a-space>
                 </template>
               </template>
@@ -707,8 +734,8 @@
 import { ref, reactive, onMounted, watch, nextTick, computed } from 'vue'
 import { saveLastSelected, getLastSelected } from '@/utils/storage'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
-import { PlusOutlined, DownOutlined, UpOutlined } from '@ant-design/icons-vue'
+import { message, Modal } from 'ant-design-vue'
+import { PlusOutlined, DownOutlined, UpOutlined, RightOutlined, FilterOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { formatDateTime, formatDate } from '@/utils/date'
 import AppHeader from '@/components/AppHeader.vue'
@@ -775,7 +802,7 @@ const searchForm = reactive({
 
 const pagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: 30,
   total: 0,
   showTotal: (total: number) => `共 ${total} 条`,
   showSizeChanger: true,
@@ -784,24 +811,78 @@ const pagination = reactive({
 
 // 计算表格滚动高度
 const tableScrollHeight = computed(() => {
-  return 'max(320px, calc(100vh - 420px))'
+  return 'calc(100vh - 342px)'
 })
 
-const columns = [
-  { title: '一级任务', key: 'level1', width: 180, ellipsis: true },
-  { title: '二级任务', key: 'level2', width: 200, ellipsis: true },
-  { title: '具体任务', key: 'specific', width: 240, ellipsis: true },
+const baseColumns = [
+  { title: '一级任务', key: 'level1', width: 160, ellipsis: true },
+  { title: '二级任务', key: 'level2', width: 180, ellipsis: true },
+  { title: '具体任务', key: 'specific', width: 220, ellipsis: true },
   { title: '项目', key: 'project', width: 120 },
   { title: '需求', key: 'requirement', width: 150 },
-  { title: '状态', key: 'status', width: 100 },
+  { title: '状态', key: 'status', width: 90 },
   { title: '优先级', key: 'priority', width: 100 },
-  { title: '负责人', key: 'assignee', width: 150 },
-  { title: '进度', key: 'progress', width: 150 },
+  { title: '负责人', key: 'assignee', width: 130, ellipsis: true },
+  { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
-  { title: '日期', key: 'dates', width: 200 },
+  { title: '日期', key: 'dates', width: 180 },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
-  { title: '操作', key: 'action', width: 300, fixed: 'right' as const }
+  { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
+
+const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'progress', 'dates']
+const savedVisibleColumns = localStorage.getItem('task_visible_columns')
+const restoreVisibleColumns = () => {
+  try {
+    const keys = savedVisibleColumns ? JSON.parse(savedVisibleColumns) : null
+    return Array.isArray(keys) ? keys : [...defaultVisibleColumnKeys]
+  } catch {
+    return [...defaultVisibleColumnKeys]
+  }
+}
+const visibleColumnKeys = ref<string[]>(restoreVisibleColumns())
+const configurableColumns = baseColumns.filter(column => column.key !== 'action')
+const columns = computed(() => baseColumns.filter(column => column.key === 'action' || visibleColumnKeys.value.includes(column.key)))
+
+watch(visibleColumnKeys, keys => {
+  localStorage.setItem('task_visible_columns', JSON.stringify(keys))
+}, { deep: true })
+
+const resetVisibleColumns = () => {
+  visibleColumnKeys.value = [...defaultVisibleColumnKeys]
+}
+
+const collapsedGroupIds = ref<Set<number>>(new Set())
+const allGroupsCollapsed = computed(() => {
+  const groups = tasks.value.filter(task => task.node_type === 'group' && (task.level || 1) < 3)
+  return groups.length > 0 && groups.every(task => collapsedGroupIds.value.has(task.id))
+})
+
+const visibleTasks = computed(() => tasks.value.filter(task => {
+  if (!showGroupNodes.value) return true
+  let parent = task.parent
+  while (parent) {
+    if (collapsedGroupIds.value.has(parent.id)) return false
+    parent = parent.parent
+  }
+  return true
+}))
+
+const toggleGroup = (id: number) => {
+  const next = new Set(collapsedGroupIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  collapsedGroupIds.value = next
+}
+
+const toggleAllGroups = () => {
+  if (allGroupsCollapsed.value) {
+    collapsedGroupIds.value = new Set()
+    return
+  }
+  collapsedGroupIds.value = new Set(
+    tasks.value.filter(task => task.node_type === 'group' && (task.level || 1) < 3).map(task => task.id)
+  )
+}
 
 const getLevelTitle = (task: Task, level: number) => {
   if ((task.level || 1) === level && task.node_type === 'group') return task.title
@@ -1251,6 +1332,25 @@ const handleStatusChange = async (id: number, status: string) => {
   }
 }
 
+const handleActionMenu = (record: Task, key: string) => {
+  if (key === 'add-child') {
+    handleCreateChild(record)
+  } else if (key === 'progress') {
+    handleUpdateProgress(record)
+  } else if (key.startsWith('status:')) {
+    handleStatusChange(record.id, key.slice(7))
+  } else if (key === 'delete') {
+    Modal.confirm({
+      title: '删除任务',
+      content: `确定要删除“${record.title}”吗？`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => handleDelete(record.id)
+    })
+  }
+}
+
 // 更新进度
 const handleUpdateProgress = (record: Task) => {
   progressFormData.task_id = record.id
@@ -1627,7 +1727,7 @@ onMounted(async () => {
 }
 
 .content {
-  padding: 24px;
+  padding: 16px;
   background: #f0f2f5;
   flex: 1;
   height: 0;
@@ -1638,7 +1738,7 @@ onMounted(async () => {
 
 .content-inner {
   background: white;
-  padding: 24px;
+  padding: 12px 16px 16px;
   border-radius: 4px;
   max-width: 100%;
   margin: 0 auto;
@@ -1646,17 +1746,53 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   height: 0;
 }
 
-/* 折叠搜索条件时移除空白正文，为任务表格留出更多空间 */
-.search-card-collapsed :deep(.ant-card-body) {
-  display: none;
+.content-inner :deep(.ant-page-header) {
+  padding: 8px 0 12px;
+}
+
+.task-toolbar {
+  min-height: 40px;
+  padding: 2px 4px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.search-card {
+  margin-top: 8px;
+}
+
+.search-card :deep(.ant-card-body) {
+  padding: 12px 12px 4px;
+}
+
+.search-card :deep(.ant-form-item) {
+  margin-bottom: 8px;
+}
+
+.column-settings {
+  width: 240px;
+}
+
+.column-settings-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.column-settings :deep(.ant-checkbox-group) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 4px;
 }
 
 .table-card {
-  margin-top: 16px;
+  margin-top: 8px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1669,7 +1805,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px;
+  padding: 8px;
 }
 
 .table-card :deep(.ant-table-wrapper) {
@@ -1705,7 +1841,7 @@ onMounted(async () => {
 
 .table-card :deep(.ant-table-container) {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -1715,8 +1851,29 @@ onMounted(async () => {
   width: 100%;
 }
 
-.table-card {
-  margin-top: 16px;
+.table-card :deep(.ant-table-thead > tr > th) {
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
+.table-card :deep(.ant-table-tbody > tr > td) {
+  height: 44px;
+  padding: 7px 12px;
+}
+
+.table-card :deep(.ant-table-pagination.ant-pagination) {
+  margin: 10px 0 2px;
+}
+
+.table-card :deep(.ant-progress-line) {
+  margin-bottom: 0;
+}
+
+.group-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: -6px;
 }
 /* 详情弹窗样式 */
 .markdown-content {
