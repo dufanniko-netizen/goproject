@@ -492,6 +492,11 @@ const handleRefresh = () => {
 // 获取状态文本
 const getStatusText = (status: string) => {
   const texts: Record<string, string> = {
+    wait: '未开始',
+    doing: '进行中',
+    pause: '已暂停',
+    closed: '已延期',
+    cancel: '已取消',
     todo: '待办',
     in_progress: '进行中',
     done: '已完成',

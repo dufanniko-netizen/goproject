@@ -121,7 +121,7 @@
               <a-select-option value="done">已完成</a-select-option>
               <a-select-option value="pause">已暂停</a-select-option>
               <a-select-option value="cancel">已取消</a-select-option>
-              <a-select-option value="closed">已关闭</a-select-option>
+              <a-select-option value="closed">已延期</a-select-option>
             </a-select>
             <a-input v-model:value="column.color" placeholder="颜色" style="width: 100px" />
             <a-input-number v-model:value="column.sort" placeholder="排序" :min="0" style="width: 100px" />
