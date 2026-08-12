@@ -194,13 +194,14 @@
                 </template>
                 <template v-else-if="column.key === 'dates'">
                   <span v-if="record.node_type === 'group'">-</span>
-                  <div v-else>
-                    <div v-if="record.start_date">开始: {{ formatDate(record.start_date) }}</div>
-                    <div v-if="record.end_date">结束: {{ formatDate(record.end_date) }}</div>
-                    <div v-if="record.due_date" :style="{ color: isOverdue(record.due_date, record.status) ? 'red' : '' }">
-                      截止: {{ formatDate(record.due_date) }}
-                    </div>
-                  </div>
+                  <a-tooltip v-else :title="getTaskDateTooltip(record)">
+                    <span
+                      class="task-date-range"
+                      :class="{ 'task-date-overdue': record.due_date && isOverdue(record.due_date, record.status) }"
+                    >
+                      {{ getTaskDateRange(record) }}
+                    </span>
+                  </a-tooltip>
                 </template>
                 <template v-else-if="column.key === 'created_at'">
                   {{ formatDateTime(record.created_at) }}
@@ -825,7 +826,7 @@ const baseColumns = [
   { title: '负责人', key: 'assignee', width: 130, ellipsis: true },
   { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
-  { title: '日期', key: 'dates', width: 180 },
+  { title: '日期', key: 'dates', width: 210 },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
@@ -893,6 +894,19 @@ const getLevelTitle = (task: Task, level: number) => {
   }
   return '-'
 }
+
+const getTaskDateRange = (task: Task) => {
+  const start = task.start_date ? formatDate(task.start_date) : '-'
+  const finishDate = task.due_date || task.end_date
+  const finish = finishDate ? formatDate(finishDate) : '-'
+  return `${start} → ${finish}`
+}
+
+const getTaskDateTooltip = (task: Task) => [
+  task.start_date ? `开始：${formatDate(task.start_date)}` : null,
+  task.end_date ? `结束：${formatDate(task.end_date)}` : null,
+  task.due_date ? `截止：${formatDate(task.due_date)}` : null
+].filter(Boolean).join('；') || '未设置日期'
 
 const modalVisible = ref(false)
 const modalTitle = ref('新增任务')
@@ -1727,7 +1741,7 @@ onMounted(async () => {
 }
 
 .content {
-  padding: 16px;
+  padding: 10px 16px;
   background: #f0f2f5;
   flex: 1;
   height: 0;
@@ -1738,7 +1752,7 @@ onMounted(async () => {
 
 .content-inner {
   background: white;
-  padding: 12px 16px 16px;
+  padding: 6px 16px 10px;
   border-radius: 4px;
   max-width: 100%;
   margin: 0 auto;
@@ -1751,7 +1765,15 @@ onMounted(async () => {
 }
 
 .content-inner :deep(.ant-page-header) {
-  padding: 8px 0 12px;
+  padding: 4px 0 8px;
+}
+
+.content-inner :deep(.ant-page-header-heading) {
+  min-height: 40px;
+}
+
+.content-inner :deep(.ant-page-header-heading-title) {
+  font-size: 22px;
 }
 
 .task-toolbar {
@@ -1805,7 +1827,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 8px;
+  padding: 4px 8px 2px;
 }
 
 .table-card :deep(.ant-table-wrapper) {
@@ -1852,21 +1874,38 @@ onMounted(async () => {
 }
 
 .table-card :deep(.ant-table-thead > tr > th) {
-  padding: 10px 12px;
+  height: 42px;
+  padding: 8px 12px;
   white-space: nowrap;
 }
 
 .table-card :deep(.ant-table-tbody > tr > td) {
-  height: 44px;
-  padding: 7px 12px;
+  height: 42px;
+  max-height: 42px;
+  padding: 5px 12px;
+  white-space: nowrap;
 }
 
 .table-card :deep(.ant-table-pagination.ant-pagination) {
-  margin: 10px 0 2px;
+  min-height: 34px;
+  margin: 6px 0 0;
 }
 
 .table-card :deep(.ant-progress-line) {
   margin-bottom: 0;
+}
+
+.task-date-range {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.task-date-overdue {
+  color: #ff4d4f;
 }
 
 .group-toggle {
