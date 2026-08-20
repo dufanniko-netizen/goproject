@@ -221,7 +221,6 @@
       @cancel="handleCloseScanAddUserModal"
     >
       <WeChatQRCode
-        ref="scanAddUserQRCodeRef"
         :fetchQRCode="getAddUserQRCode"
         initial-status-text="请使用微信扫码"
         hint="扫码后会在微信内打开授权页面，确认后将添加该用户"
@@ -307,7 +306,6 @@
       @cancel="handleCloseBindWeChatModal"
     >
       <WeChatQRCode
-        ref="bindWeChatQRCodeRef"
         :fetchQRCode="getBindWeChatQRCode"
         initial-status-text="请使用微信扫码"
         hint="扫码后会在微信内打开授权页面，确认后将绑定该用户的微信"
@@ -481,7 +479,6 @@ const selectedRoleIds = ref<number[]>([])
 const currentUserId = ref<number>()
 
 const scanAddUserModalVisible = ref(false)
-const scanAddUserQRCodeRef = ref<InstanceType<typeof WeChatQRCode>>()
 
 const nicknameModalVisible = ref(false)
 const nicknameSubmitting = ref(false)
@@ -507,7 +504,6 @@ const changePasswordFormData = reactive({
 })
 
 const bindWeChatModalVisible = ref(false)
-const bindWeChatQRCodeRef = ref<InstanceType<typeof WeChatQRCode>>()
 const bindWeChatUser = ref<User | null>(null)
 
 // 验证确认密码
