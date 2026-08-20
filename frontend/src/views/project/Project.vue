@@ -812,7 +812,7 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const isDirector = computed(() => authStore.user?.roles?.some(role => role.name === '主任' || role.code === 'director') || false)
+const isDirector = computed(() => authStore.user?.roles?.includes('director') || false)
 
 const projectLoading = ref(false)
 const memberLoading = ref(false)
