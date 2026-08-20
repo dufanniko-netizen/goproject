@@ -30,6 +30,7 @@ func AutoMigrate(db *gorm.DB) error {
 		// 项目
 		&model.Project{},
 		&model.ProjectMember{},
+		&model.ProjectApproval{},
 		// 功能模块
 		&model.Module{},
 
@@ -337,26 +338,26 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 				Status:      1,
 			},
 			Permissions: []string{
-				"dashboard",                    // 工作台
-				"daily-report:create",         // 写日报
-				"project-management",          // 项目管理菜单
-				"project:list",                // 项目列表
-				"project:read",                // 查看项目
-				"requirement:menu",            // 需求管理菜单
-				"requirement:read",            // 查看需求
-				"task:read",                   // 任务管理（菜单和查看）
-				"resource-management",         // 资源管理菜单
-				"resource:read",               // 查看资源
-				"system-management",           // 系统管理菜单
-				"user:menu",                   // 用户管理菜单
-				"user:read",                   // 查看用户
-				"user:create",                 // 创建用户
-				"user:update",                 // 更新用户
-				"department:read",             // 部门管理菜单
-				"department:create",           // 创建部门
-				"department:update",           // 更新部门
-				"department:delete",           // 删除部门
-				"attachment:upload",           // 上传附件
+				"dashboard",           // 工作台
+				"daily-report:create", // 写日报
+				"project-management",  // 项目管理菜单
+				"project:list",        // 项目列表
+				"project:read",        // 查看项目
+				"requirement:menu",    // 需求管理菜单
+				"requirement:read",    // 查看需求
+				"task:read",           // 任务管理（菜单和查看）
+				"resource-management", // 资源管理菜单
+				"resource:read",       // 查看资源
+				"system-management",   // 系统管理菜单
+				"user:menu",           // 用户管理菜单
+				"user:read",           // 查看用户
+				"user:create",         // 创建用户
+				"user:update",         // 更新用户
+				"department:read",     // 部门管理菜单
+				"department:create",   // 创建部门
+				"department:update",   // 更新部门
+				"department:delete",   // 删除部门
+				"attachment:upload",   // 上传附件
 			},
 		},
 		{
@@ -367,38 +368,38 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 				Status:      1,
 			},
 			Permissions: []string{
-				"dashboard",                    // 工作台
-				"daily-report:create",         // 写日报
-				"project-management",          // 项目管理菜单
-				"project:list",                // 项目列表
-				"project:create",              // 创建项目
-				"project:read",                // 查看项目
-				"project:update",              // 更新项目
-				"project:manage",              // 管理项目
-				"requirement:menu",            // 需求管理菜单
-				"requirement:read",            // 查看需求
-				"requirement:create",          // 创建需求
-				"requirement:update",          // 更新需求
-				"requirement:delete",          // 删除需求
-				"task:read",                   // 任务管理（菜单和查看）
-				"task:create",                 // 创建任务
-				"task:update",                 // 更新任务
-				"task:delete",                 // 删除任务
-				"resource-management",         // 资源管理菜单
-				"resource:read",               // 查看资源
-				"resource:manage",            // 管理资源
-				"test-management",             // 测试管理菜单
-				"test-case:read",              // 查看测试用例
-				"bug:read",                    // Bug管理菜单
-				"bug:create",                  // 创建Bug
-				"bug:update",                  // 更新Bug
-				"bug:assign",                  // 分配Bug
-				"version:read",                 // 查看版本
-				"system-management",           // 系统管理菜单
-				"user:menu",                   // 用户管理菜单
-				"user:read",                   // 查看用户
-				"attachment:upload",           // 上传附件
-				"attachment:delete",           // 删除附件
+				"dashboard",           // 工作台
+				"daily-report:create", // 写日报
+				"project-management",  // 项目管理菜单
+				"project:list",        // 项目列表
+				"project:create",      // 创建项目
+				"project:read",        // 查看项目
+				"project:update",      // 更新项目
+				"project:manage",      // 管理项目
+				"requirement:menu",    // 需求管理菜单
+				"requirement:read",    // 查看需求
+				"requirement:create",  // 创建需求
+				"requirement:update",  // 更新需求
+				"requirement:delete",  // 删除需求
+				"task:read",           // 任务管理（菜单和查看）
+				"task:create",         // 创建任务
+				"task:update",         // 更新任务
+				"task:delete",         // 删除任务
+				"resource-management", // 资源管理菜单
+				"resource:read",       // 查看资源
+				"resource:manage",     // 管理资源
+				"test-management",     // 测试管理菜单
+				"test-case:read",      // 查看测试用例
+				"bug:read",            // Bug管理菜单
+				"bug:create",          // 创建Bug
+				"bug:update",          // 更新Bug
+				"bug:assign",          // 分配Bug
+				"version:read",        // 查看版本
+				"system-management",   // 系统管理菜单
+				"user:menu",           // 用户管理菜单
+				"user:read",           // 查看用户
+				"attachment:upload",   // 上传附件
+				"attachment:delete",   // 删除附件
 			},
 		},
 		{
@@ -409,26 +410,26 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 				Status:      1,
 			},
 			Permissions: []string{
-				"dashboard",                    // 工作台
-				"daily-report:create",         // 写日报
-				"project-management",          // 项目管理菜单
-				"project:list",                // 项目列表
-				"project:read",                // 查看项目
-				"requirement:menu",            // 需求管理菜单
-				"requirement:read",            // 查看需求
-				"task:read",                   // 任务管理（菜单和查看）
-				"task:create",                 // 创建任务
-				"task:update",                 // 更新任务
-				"test-management",             // 测试管理菜单
-				"test-case:read",              // 查看测试用例（测试单管理菜单）
-				"test-case:create",            // 创建测试用例
-				"test-case:update",            // 更新测试用例
-				"bug:read",                    // Bug管理菜单
-				"bug:create",                  // 创建Bug
-				"bug:update",                  // 更新Bug
-				"bug:assign",                  // 分配Bug
-				"user:read",                   // 查看用户
-				"attachment:upload",           // 上传附件
+				"dashboard",           // 工作台
+				"daily-report:create", // 写日报
+				"project-management",  // 项目管理菜单
+				"project:list",        // 项目列表
+				"project:read",        // 查看项目
+				"requirement:menu",    // 需求管理菜单
+				"requirement:read",    // 查看需求
+				"task:read",           // 任务管理（菜单和查看）
+				"task:create",         // 创建任务
+				"task:update",         // 更新任务
+				"test-management",     // 测试管理菜单
+				"test-case:read",      // 查看测试用例（测试单管理菜单）
+				"test-case:create",    // 创建测试用例
+				"test-case:update",    // 更新测试用例
+				"bug:read",            // Bug管理菜单
+				"bug:create",          // 创建Bug
+				"bug:update",          // 更新Bug
+				"bug:assign",          // 分配Bug
+				"user:read",           // 查看用户
+				"attachment:upload",   // 上传附件
 			},
 		},
 		{
@@ -439,27 +440,27 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 				Status:      1,
 			},
 			Permissions: []string{
-				"dashboard",                    // 工作台
-				"daily-report:create",         // 写日报
-				"project-management",          // 项目管理菜单
-				"project:list",                // 项目列表
-				"project:read",                // 查看项目
-				"requirement:menu",            // 需求管理菜单
-				"requirement:read",            // 查看需求
-				"task:read",                   // 任务管理（菜单和查看）
-				"test-management",             // 测试管理菜单
-				"test-case:read",              // 查看测试用例
-				"test-case:create",            // 创建测试用例
-				"test-case:update",            // 更新测试用例
-				"test-case:delete",            // 删除测试用例
-				"bug:read",                    // Bug管理菜单
-				"bug:create",                  // 创建Bug
-				"bug:update",                  // 更新Bug
-				"bug:delete",                  // 删除Bug
-				"bug:assign",                  // 分配Bug
-				"version:read",                 // 查看版本
-				"user:read",                   // 查看用户
-				"attachment:upload",           // 上传附件
+				"dashboard",           // 工作台
+				"daily-report:create", // 写日报
+				"project-management",  // 项目管理菜单
+				"project:list",        // 项目列表
+				"project:read",        // 查看项目
+				"requirement:menu",    // 需求管理菜单
+				"requirement:read",    // 查看需求
+				"task:read",           // 任务管理（菜单和查看）
+				"test-management",     // 测试管理菜单
+				"test-case:read",      // 查看测试用例
+				"test-case:create",    // 创建测试用例
+				"test-case:update",    // 更新测试用例
+				"test-case:delete",    // 删除测试用例
+				"bug:read",            // Bug管理菜单
+				"bug:create",          // 创建Bug
+				"bug:update",          // 更新Bug
+				"bug:delete",          // 删除Bug
+				"bug:assign",          // 分配Bug
+				"version:read",        // 查看版本
+				"user:read",           // 查看用户
+				"attachment:upload",   // 上传附件
 			},
 		},
 	}

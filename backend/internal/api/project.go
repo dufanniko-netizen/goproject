@@ -18,10 +18,157 @@ func NewProjectHandler(db *gorm.DB) *ProjectHandler {
 	return &ProjectHandler{db: db}
 }
 
+func (h *ProjectHandler) isDirector(userID uint) bool {
+	var count int64
+	h.db.Table("user_roles").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND (roles.name = ? OR roles.code = ?)", userID, "主任", "director").
+		Count(&count)
+	return count > 0
+}
+
+// SubmitProjectApproval 将自动化项目及其现有任务整体提交给主任审核。
+func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
+	var project model.Project
+	if err := h.db.First(&project, c.Param("id")).Error; err != nil {
+		utils.Error(c, 404, "项目不存在")
+		return
+	}
+	userID := utils.GetUserID(c)
+	if project.CreatorID == nil || *project.CreatorID != userID {
+		utils.Error(c, 403, "只有项目申请人可以提交审核")
+		return
+	}
+	if project.ProjectType != "automation" {
+		utils.Error(c, 400, "智慧仓库项目无需审核")
+		return
+	}
+	if project.ApprovalStatus != "draft" && project.ApprovalStatus != "rejected" {
+		utils.Error(c, 409, "当前状态不能提交审核")
+		return
+	}
+	var directorCount int64
+	h.db.Table("user_roles").Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("roles.name = ? OR roles.code = ?", "主任", "director").Count(&directorCount)
+	if directorCount == 0 {
+		utils.Error(c, 409, "系统尚未配置主任角色用户")
+		return
+	}
+	now := time.Now()
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		project.ApprovalStatus = "pending"
+		project.SubmittedAt = &now
+		if err := tx.Save(&project).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.ProjectApproval{
+			ProjectID: project.ID, SubmitterID: userID, Status: "pending", SubmittedAt: now,
+		}).Error
+	})
+	if err != nil {
+		utils.Error(c, utils.CodeError, "提交审核失败")
+		return
+	}
+	utils.Success(c, project)
+}
+
+// GetPendingProjectApprovals 主任查看待审核自动化项目。
+func (h *ProjectHandler) GetPendingProjectApprovals(c *gin.Context) {
+	userID := utils.GetUserID(c)
+	if !h.isDirector(userID) && !utils.IsAdmin(c) {
+		utils.Error(c, 403, "只有主任可以审核项目")
+		return
+	}
+	var projects []model.Project
+	if err := h.db.Preload("Creator").Preload("Tasks", func(db *gorm.DB) *gorm.DB { return db.Order("level, id") }).
+		Where("project_type = ? AND approval_status = ?", "automation", "pending").
+		Order("submitted_at ASC").Find(&projects).Error; err != nil {
+		utils.Error(c, utils.CodeError, "查询待审核项目失败")
+		return
+	}
+	utils.Success(c, projects)
+}
+
+// ReviewProject 主任通过或驳回项目。首次完成审核者生效。
+func (h *ProjectHandler) ReviewProject(c *gin.Context) {
+	userID := utils.GetUserID(c)
+	if !h.isDirector(userID) && !utils.IsAdmin(c) {
+		utils.Error(c, 403, "只有主任可以审核项目")
+		return
+	}
+	var req struct {
+		Decision string `json:"decision" binding:"required"`
+		Comment  string `json:"comment"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Decision != "approved" && req.Decision != "rejected") {
+		utils.Error(c, 400, "审核结果必须是 approved 或 rejected")
+		return
+	}
+	if req.Decision == "rejected" && req.Comment == "" {
+		utils.Error(c, 400, "驳回时必须填写审核意见")
+		return
+	}
+	var project model.Project
+	if err := h.db.First(&project, c.Param("id")).Error; err != nil {
+		utils.Error(c, 404, "项目不存在")
+		return
+	}
+	if project.CreatorID != nil && *project.CreatorID == userID {
+		utils.Error(c, 403, "不能审核自己提交的项目")
+		return
+	}
+	if project.ProjectType != "automation" || project.ApprovalStatus != "pending" {
+		utils.Error(c, 409, "项目不在待审核状态")
+		return
+	}
+	now := time.Now()
+	newApprovalStatus := "rejected"
+	var publishedAt interface{}
+	if req.Decision == "approved" {
+		newApprovalStatus = "published"
+		publishedAt = &now
+	}
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Project{}).Where("id = ? AND approval_status = ?", project.ID, "pending").
+			Updates(map[string]interface{}{"approval_status": newApprovalStatus, "published_at": publishedAt})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&model.ProjectApproval{}).
+			Where("project_id = ? AND status = ?", project.ID, "pending").
+			Updates(map[string]interface{}{"status": req.Decision, "comment": req.Comment, "reviewer_id": userID, "reviewed_at": now}).Error
+	})
+	if err != nil {
+		utils.Error(c, 409, "项目已被其他审核人处理")
+		return
+	}
+	h.db.Preload("Creator").First(&project, project.ID)
+	utils.Success(c, project)
+}
+
+func (h *ProjectHandler) GetProjectApprovals(c *gin.Context) {
+	var project model.Project
+	if err := h.db.First(&project, c.Param("id")).Error; err != nil {
+		utils.Error(c, 404, "项目不存在")
+		return
+	}
+	userID := utils.GetUserID(c)
+	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.isDirector(userID) && !utils.IsAdmin(c) {
+		utils.Error(c, 403, "没有权限查看审核记录")
+		return
+	}
+	var records []model.ProjectApproval
+	h.db.Preload("Submitter").Preload("Reviewer").Where("project_id = ?", project.ID).Order("created_at DESC").Find(&records)
+	utils.Success(c, records)
+}
+
 // GetProjects 获取项目列表
 func (h *ProjectHandler) GetProjects(c *gin.Context) {
 	var projects []model.Project
-	query := h.db.Preload("Tags")
+	query := h.db.Preload("Tags").Preload("Creator").Preload("ApprovalRecords", func(db *gorm.DB) *gorm.DB { return db.Order("created_at DESC") })
 
 	// 权限过滤：普通用户只能看到自己参与的项目
 	query = utils.FilterProjectsByUser(h.db, c, query)
@@ -48,6 +195,12 @@ func (h *ProjectHandler) GetProjects(c *gin.Context) {
 	// 状态筛选
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if projectType := c.Query("project_type"); projectType != "" {
+		query = query.Where("project_type = ?", projectType)
+	}
+	if approvalStatus := c.Query("approval_status"); approvalStatus != "" {
+		query = query.Where("approval_status = ?", approvalStatus)
 	}
 
 	// 项目ID筛选（精确匹配）
@@ -80,6 +233,12 @@ func (h *ProjectHandler) GetProjects(c *gin.Context) {
 	if status := c.Query("status"); status != "" {
 		countQuery = countQuery.Where("status = ?", status)
 	}
+	if projectType := c.Query("project_type"); projectType != "" {
+		countQuery = countQuery.Where("project_type = ?", projectType)
+	}
+	if approvalStatus := c.Query("approval_status"); approvalStatus != "" {
+		countQuery = countQuery.Where("approval_status = ?", approvalStatus)
+	}
 	if projectID := c.Query("project_id"); projectID != "" {
 		countQuery = countQuery.Where("id = ?", projectID)
 	}
@@ -105,13 +264,15 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 	if err := h.db.
 		Preload("Members.User").
 		Preload("Tags").
+		Preload("Creator").
+		Preload("ApprovalRecords", func(db *gorm.DB) *gorm.DB { return db.Order("created_at DESC") }).
 		First(&project, id).Error; err != nil {
 		utils.Error(c, 404, "项目不存在")
 		return
 	}
 
 	// 权限检查：普通用户只能查看自己参与的项目
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.isDirector(utils.GetUserID(c)) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}
@@ -199,6 +360,7 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		TagIDs      []uint  `json:"tag_ids"`    // 标签ID数组
 		StartDate   *string `json:"start_date"` // 接收字符串格式的日期
 		EndDate     *string `json:"end_date"`   // 接收字符串格式的日期
+		ProjectType string  `json:"project_type"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -212,6 +374,13 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 	}
 	if !isValidProjectStatus(req.Status) {
 		utils.Error(c, 400, "状态值无效，有效值：wait, doing, suspended, closed, done")
+		return
+	}
+	if req.ProjectType == "" {
+		req.ProjectType = "smart_warehouse"
+	}
+	if req.ProjectType != "smart_warehouse" && req.ProjectType != "automation" {
+		utils.Error(c, 400, "项目类型无效")
 		return
 	}
 
@@ -228,13 +397,25 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 		}
 	}
 
+	userID := utils.GetUserID(c)
+	now := time.Now()
+	approvalStatus := "published"
+	var publishedAt *time.Time = &now
+	if req.ProjectType == "automation" {
+		approvalStatus = "draft"
+		publishedAt = nil
+	}
 	project := model.Project{
-		Name:        req.Name,
-		Code:        req.Code,
-		Description: req.Description,
-		Status:      req.Status,
-		StartDate:   startDate,
-		EndDate:     endDate,
+		Name:           req.Name,
+		Code:           req.Code,
+		Description:    req.Description,
+		Status:         req.Status,
+		StartDate:      startDate,
+		EndDate:        endDate,
+		ProjectType:    req.ProjectType,
+		ApprovalStatus: approvalStatus,
+		CreatorID:      &userID,
+		PublishedAt:    publishedAt,
 	}
 
 	// 关联标签
@@ -258,7 +439,6 @@ func (h *ProjectHandler) CreateProject(c *gin.Context) {
 	}
 
 	// 自动将创建者添加为项目成员（角色：项目经理）
-	userID := utils.GetUserID(c)
 	if userID > 0 {
 		// 检查是否已经是成员（防止重复）
 		var existingMember model.ProjectMember
@@ -319,6 +499,7 @@ func (h *ProjectHandler) UpdateProject(c *gin.Context) {
 		TagIDs      *[]uint `json:"tag_ids"`    // 标签ID数组
 		StartDate   *string `json:"start_date"` // 接收字符串格式的日期
 		EndDate     *string `json:"end_date"`   // 接收字符串格式的日期
+		ProjectType *string `json:"project_type"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -342,6 +523,25 @@ func (h *ProjectHandler) UpdateProject(c *gin.Context) {
 			return
 		}
 		project.Status = *req.Status
+	}
+	if project.ApprovalStatus == "pending" {
+		utils.Error(c, 409, "项目正在审核，不能修改")
+		return
+	}
+	if req.ProjectType != nil {
+		if *req.ProjectType != "smart_warehouse" && *req.ProjectType != "automation" {
+			utils.Error(c, 400, "项目类型无效")
+			return
+		}
+		project.ProjectType = *req.ProjectType
+		if *req.ProjectType == "smart_warehouse" {
+			project.ApprovalStatus = "published"
+			now := time.Now()
+			project.PublishedAt = &now
+		} else if oldProject.ProjectType != "automation" {
+			project.ApprovalStatus = "draft"
+			project.PublishedAt = nil
+		}
 	}
 
 	// 更新标签关联

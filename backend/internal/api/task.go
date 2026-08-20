@@ -14,6 +14,17 @@ type TaskHandler struct {
 	db *gorm.DB
 }
 
+func (h *TaskHandler) ensureProjectNotUnderReview(projectID uint) error {
+	var project model.Project
+	if err := h.db.Select("id", "approval_status").First(&project, projectID).Error; err != nil {
+		return err
+	}
+	if project.ApprovalStatus == "pending" {
+		return fmt.Errorf("项目正在审核，任务暂时不能修改")
+	}
+	return nil
+}
+
 func NewTaskHandler(db *gorm.DB) *TaskHandler {
 	return &TaskHandler{db: db}
 }
@@ -137,20 +148,20 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 // CreateTask 创建任务
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var req struct {
-		Title          string    `json:"title" binding:"required"`
-		Description    string    `json:"description"`
-		Status         string    `json:"status"`
-		Priority       string    `json:"priority"`
-		ProjectID      uint      `json:"project_id" binding:"required"`
-		RequirementID  *uint     `json:"requirement_id"`
-		AssigneeID     *uint     `json:"assignee_id"`
-		StartDate      *string   `json:"start_date"`
-		EndDate        *string   `json:"end_date"`
-		DueDate        *string   `json:"due_date"`
-		Progress       int       `json:"progress"`
-		EstimatedHours *float64  `json:"estimated_hours"`
-		DependencyIDs  []uint    `json:"dependency_ids"`
-		ParentID       *uint     `json:"parent_id"`
+		Title          string   `json:"title" binding:"required"`
+		Description    string   `json:"description"`
+		Status         string   `json:"status"`
+		Priority       string   `json:"priority"`
+		ProjectID      uint     `json:"project_id" binding:"required"`
+		RequirementID  *uint    `json:"requirement_id"`
+		AssigneeID     *uint    `json:"assignee_id"`
+		StartDate      *string  `json:"start_date"`
+		EndDate        *string  `json:"end_date"`
+		DueDate        *string  `json:"due_date"`
+		Progress       int      `json:"progress"`
+		EstimatedHours *float64 `json:"estimated_hours"`
+		DependencyIDs  []uint   `json:"dependency_ids"`
+		ParentID       *uint    `json:"parent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,12 +181,12 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		req.Status = "wait"
 	}
 	validStatuses := map[string]bool{
-		"wait":    true,
-		"doing":   true,
-		"done":    true,
-		"pause":   true,
-		"cancel":  true,
-		"closed":  true,
+		"wait":   true,
+		"doing":  true,
+		"done":   true,
+		"pause":  true,
+		"cancel": true,
+		"closed": true,
 	}
 	if !validStatuses[req.Status] {
 		utils.Error(c, 400, "状态值无效，有效值：wait, doing, done, pause, cancel, closed")
@@ -207,6 +218,10 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var project model.Project
 	if err := h.db.First(&project, req.ProjectID).Error; err != nil {
 		utils.Error(c, 400, "项目不存在")
+		return
+	}
+	if err := h.ensureProjectNotUnderReview(project.ID); err != nil {
+		utils.Error(c, 409, err.Error())
 		return
 	}
 
@@ -352,6 +367,10 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		utils.Error(c, 403, "没有权限更新该任务")
 		return
 	}
+	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+		utils.Error(c, 409, err.Error())
+		return
+	}
 
 	// 保存旧对象用于比较
 	oldTask := task
@@ -370,7 +389,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		Progress       *int     `json:"progress"`
 		EstimatedHours *float64 `json:"estimated_hours"`
 		ActualHours    *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
-		WorkDate       *string  `json:"work_date"`     // 工作日期（YYYY-MM-DD），用于资源分配
+		WorkDate       *string  `json:"work_date"`    // 工作日期（YYYY-MM-DD），用于资源分配
 		DependencyIDs  *[]uint  `json:"dependency_ids"`
 		ParentID       *uint    `json:"parent_id"`
 	}
@@ -390,12 +409,12 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	if req.Status != nil {
 		// 验证状态
 		validStatuses := map[string]bool{
-			"wait":    true,
-			"doing":   true,
-			"done":    true,
-			"pause":   true,
-			"cancel":  true,
-			"closed":  true,
+			"wait":   true,
+			"doing":  true,
+			"done":   true,
+			"pause":  true,
+			"cancel": true,
+			"closed": true,
 		}
 		if !validStatuses[*req.Status] {
 			utils.Error(c, 400, "状态值无效，有效值：wait, doing, done, pause, cancel, closed")
@@ -560,7 +579,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			}
 		}
 		workDate = time.Date(workDate.Year(), workDate.Month(), workDate.Day(), 0, 0, 0, 0, workDate.Location())
-		
+
 		// 同步到资源分配
 		if err := h.syncTaskActualHours(&task, *req.ActualHours, workDate); err != nil {
 			utils.Error(c, utils.CodeError, "同步资源分配失败: "+err.Error())
@@ -575,7 +594,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 
 	// 计算并更新实际工时（从资源分配中汇总）
 	h.calculateAndUpdateActualHours(&task)
-	
+
 	// 根据实际工时和预估工时自动计算进度
 	h.calculateProgressFromHours(&task)
 
@@ -633,6 +652,10 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 		utils.Error(c, 403, "没有权限删除该任务")
 		return
 	}
+	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+		utils.Error(c, 409, err.Error())
+		return
+	}
 
 	// 检查是否有其他任务依赖此任务
 	var count int64
@@ -669,6 +692,10 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 		utils.Error(c, 403, "没有权限更新该任务")
 		return
 	}
+	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+		utils.Error(c, 409, err.Error())
+		return
+	}
 
 	var req struct {
 		Status string `json:"status" binding:"required"`
@@ -681,12 +708,12 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 
 	// 验证状态
 	validStatuses := map[string]bool{
-		"wait":    true,
-		"doing":   true,
-		"done":    true,
-		"pause":   true,
-		"cancel":  true,
-		"closed":  true,
+		"wait":   true,
+		"doing":  true,
+		"done":   true,
+		"pause":  true,
+		"cancel": true,
+		"closed": true,
 	}
 	if !validStatuses[req.Status] {
 		utils.Error(c, 400, "状态值无效，有效值：wait, doing, done, pause, cancel, closed")
@@ -724,6 +751,10 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	// 权限检查：普通用户只能更新自己创建或参与的任务
 	if !utils.CheckTaskAccess(h.db, c, task.ID) {
 		utils.Error(c, 403, "没有权限更新该任务")
+		return
+	}
+	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+		utils.Error(c, 409, err.Error())
 		return
 	}
 
@@ -792,7 +823,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 			}
 		}
 		workDate = time.Date(workDate.Year(), workDate.Month(), workDate.Day(), 0, 0, 0, 0, workDate.Location())
-		
+
 		// 同步到资源分配
 		if err := h.syncTaskActualHours(&task, *req.ActualHours, workDate); err != nil {
 			utils.Error(c, utils.CodeError, "同步资源分配失败: "+err.Error())
@@ -807,7 +838,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 
 	// 计算并更新实际工时（从资源分配中汇总）
 	h.calculateAndUpdateActualHours(&task)
-	
+
 	// 如果用户手动设置了进度，优先使用手动设置的进度，不根据工时自动计算
 	// 只有在没有手动设置进度时，才根据工时自动计算进度
 	if req.Progress == nil {
@@ -827,7 +858,6 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 
 	utils.Success(c, task)
 }
-
 
 // syncTaskActualHours 同步任务实际工时到资源分配
 func (h *TaskHandler) syncTaskActualHours(task *model.Task, actualHours float64, workDate time.Time) error {
@@ -904,12 +934,12 @@ func (h *TaskHandler) calculateProgressFromHours(task *model.Task) {
 
 	// 计算进度：实际工时 / 预估工时 * 100
 	progress := int((actualHours / *task.EstimatedHours) * 100)
-	
+
 	// 进度不能超过100%
 	if progress > 100 {
 		progress = 100
 	}
-	
+
 	// 如果进度小于0，设为0
 	if progress < 0 {
 		progress = 0
@@ -917,7 +947,7 @@ func (h *TaskHandler) calculateProgressFromHours(task *model.Task) {
 
 	// 更新进度
 	task.Progress = progress
-	
+
 	// 如果进度为100，自动设置状态为done
 	if progress == 100 && task.Status != "done" {
 		task.Status = "done"

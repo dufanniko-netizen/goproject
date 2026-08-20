@@ -12,6 +12,14 @@ export interface Project {
   created_at?: string
   updated_at?: string
   members?: ProjectMember[]
+  project_type: 'smart_warehouse' | 'automation'
+  approval_status: 'draft' | 'pending' | 'rejected' | 'published'
+  creator_id?: number
+  creator?: { id: number; username: string; nickname?: string }
+  submitted_at?: string
+  published_at?: string
+  tasks?: Array<{ id: number; title: string; level: number; node_type: string }>
+  approval_records?: ProjectApproval[]
 }
 
 export interface ProjectStatistics {
@@ -59,6 +67,7 @@ export interface CreateProjectRequest {
   tag_ids?: number[]  // 标签ID数组
   start_date?: string
   end_date?: string
+  project_type?: 'smart_warehouse' | 'automation'
 }
 
 export interface AddProjectMembersRequest {
@@ -93,6 +102,22 @@ export const createProject = async (data: CreateProjectRequest): Promise<Project
 export const updateProject = async (id: number, data: Partial<CreateProjectRequest>): Promise<Project> => {
   return request.put(`/projects/${id}`, data)
 }
+
+export interface ProjectApproval {
+  id: number
+  project_id: number
+  status: 'pending' | 'approved' | 'rejected'
+  comment?: string
+  submitted_at: string
+  reviewed_at?: string
+  submitter?: { id: number; username: string; nickname?: string }
+  reviewer?: { id: number; username: string; nickname?: string }
+}
+
+export const submitProjectApproval = async (id: number): Promise<Project> => request.post(`/projects/${id}/submit-approval`)
+export const getPendingProjectApprovals = async (): Promise<Project[]> => request.get('/projects/approvals/pending')
+export const reviewProject = async (id: number, decision: 'approved' | 'rejected', comment?: string): Promise<Project> => request.post(`/projects/${id}/review`, { decision, comment })
+export const getProjectApprovals = async (id: number): Promise<ProjectApproval[]> => request.get(`/projects/${id}/approvals`)
 
 export const deleteProject = async (id: number): Promise<void> => {
   return request.delete(`/projects/${id}`)

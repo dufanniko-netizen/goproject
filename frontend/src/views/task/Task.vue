@@ -88,10 +88,12 @@
                   allow-clear
                   style="width: 120px"
                 >
-                  <a-select-option value="todo">待办</a-select-option>
-                  <a-select-option value="in_progress">进行中</a-select-option>
+                  <a-select-option value="wait">未开始</a-select-option>
+                  <a-select-option value="doing">进行中</a-select-option>
                   <a-select-option value="done">已完成</a-select-option>
-                  <a-select-option value="cancelled">已取消</a-select-option>
+                  <a-select-option value="pause">已暂停</a-select-option>
+                  <a-select-option value="cancel">已取消</a-select-option>
+                  <a-select-option value="closed">已延期</a-select-option>
                 </a-select>
               </a-form-item>
               <a-form-item label="优先级">

@@ -36,7 +36,7 @@ var frontendFS embed.FS
 
 // 版本信息（可以通过构建时注入）
 var (
-	Version   = "v0.4.13"  // 版本号
+	Version   = "v0.4.13" // 版本号
 	BuildTime = "unknown" // 构建时间
 	GitCommit = "unknown" // Git提交哈希
 )
@@ -848,6 +848,7 @@ func main() {
 
 	projectGroup := r.Group("/api/projects", middleware.Auth())
 	{
+		projectGroup.GET("/approvals/pending", middleware.RequirePermission(db, "project:read"), projectHandler.GetPendingProjectApprovals)
 		projectGroup.GET("", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjects)
 		// 注意：统计接口、看板接口和甘特图接口需要在详情接口之前，避免路由冲突
 		projectGroup.GET("/:id/statistics", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectStatistics)
@@ -859,6 +860,9 @@ func main() {
 		projectGroup.GET("/:id", middleware.RequirePermission(db, "project:read"), projectHandler.GetProject)
 		projectGroup.POST("", middleware.RequirePermission(db, "project:create"), projectHandler.CreateProject)
 		projectGroup.PUT("/:id", middleware.RequirePermission(db, "project:update"), projectHandler.UpdateProject)
+		projectGroup.POST("/:id/submit-approval", middleware.RequirePermission(db, "project:update"), projectHandler.SubmitProjectApproval)
+		projectGroup.POST("/:id/review", middleware.RequirePermission(db, "project:read"), projectHandler.ReviewProject)
+		projectGroup.GET("/:id/approvals", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectApprovals)
 		projectGroup.DELETE("/:id", middleware.RequirePermission(db, "project:delete"), projectHandler.DeleteProject)
 		// 项目历史记录
 		projectGroup.GET("/:id/history", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectHistory)
