@@ -200,7 +200,7 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 	for i := range defaultPermissions {
 		perm := &defaultPermissions[i]
 		var existingPerm model.Permission
-		if err := db.Where("code = ?", perm.Code).First(&existingPerm).Error; err != nil {
+		if err := db.Unscoped().Where("code = ?", perm.Code).First(&existingPerm).Error; err != nil {
 			// 权限不存在，创建
 			if err := db.Create(perm).Error; err != nil {
 				return err
@@ -216,12 +216,13 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 				"menu_icon":  perm.MenuIcon,
 				"menu_title": perm.MenuTitle,
 				"menu_order": perm.MenuOrder,
+				"deleted_at": nil,
 			}
-			if err := db.Model(&existingPerm).Updates(updates).Error; err != nil {
+			if err := db.Unscoped().Model(&existingPerm).Updates(updates).Error; err != nil {
 				return err
 			}
 			// 重新加载以获取最新数据
-			db.First(&existingPerm, existingPerm.ID)
+			db.Unscoped().First(&existingPerm, existingPerm.ID)
 			permMap[perm.Code] = &existingPerm
 		}
 	}
@@ -304,7 +305,7 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 
 	// 创建管理员角色（如果不存在）
 	var adminRole model.Role
-	if err := db.Where("code = ?", "admin").First(&adminRole).Error; err != nil {
+	if err := db.Unscoped().Where("code = ?", "admin").First(&adminRole).Error; err != nil {
 		adminRole = model.Role{
 			Name:        "管理员",
 			Code:        "admin",
@@ -312,6 +313,10 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 			Status:      1,
 		}
 		if err := db.Create(&adminRole).Error; err != nil {
+			return err
+		}
+	} else if adminRole.DeletedAt.Valid {
+		if err := db.Unscoped().Model(&adminRole).Updates(map[string]interface{}{"deleted_at": nil, "status": 1}).Error; err != nil {
 			return err
 		}
 	}
@@ -469,7 +474,7 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 	for _, roleData := range defaultRoles {
 		role := roleData.Role
 		var existingRole model.Role
-		if err := db.Where("code = ?", role.Code).First(&existingRole).Error; err != nil {
+		if err := db.Unscoped().Where("code = ?", role.Code).First(&existingRole).Error; err != nil {
 			// 角色不存在，创建
 			if err := db.Create(&role).Error; err != nil {
 				return err
@@ -477,9 +482,11 @@ func initDefaultPermissionsAndRoles(db *gorm.DB) error {
 			existingRole = role
 		} else {
 			// 角色已存在，更新描述（保留现有ID）
-			if err := db.Model(&existingRole).Updates(map[string]interface{}{
+			if err := db.Unscoped().Model(&existingRole).Updates(map[string]interface{}{
 				"name":        role.Name,
 				"description": role.Description,
+				"deleted_at":  nil,
+				"status":      1,
 			}).Error; err != nil {
 				return err
 			}
