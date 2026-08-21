@@ -9,6 +9,32 @@ import (
 	"gorm.io/gorm"
 )
 
+// allowPendingReviewerPermission 允许当前有待审批项目的直属审核人进入项目/任务接口。
+// 这里只放行路由层；具体项目和任务仍由各 Handler 的数据权限检查限制。
+func allowPendingReviewerPermission(db *gorm.DB, c *gin.Context, permCode string) bool {
+	allowed := map[string]bool{
+		"project:read":   true,
+		"project:update": true,
+		"project:delete": true,
+		"task:read":      true,
+		"task:create":    true,
+		"task:update":    true,
+		"task:delete":    true,
+	}
+	if !allowed[permCode] {
+		return false
+	}
+	userID := utils.GetUserID(c)
+	if userID == 0 {
+		return false
+	}
+	var count int64
+	db.Model(&model.ProjectApproval{}).
+		Where("reviewer_id = ? AND status = ?", userID, "pending").
+		Count(&count)
+	return count > 0
+}
+
 // RequirePermission 要求特定权限
 func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -22,6 +48,10 @@ func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 						return
 					}
 				}
+				if allowPendingReviewerPermission(db, c, permCode) {
+					c.Next()
+					return
+				}
 				utils.Error(c, 403, "没有权限")
 				c.Abort()
 				return
@@ -31,6 +61,10 @@ func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 		// 如果上下文没有权限列表，从角色查询
 		roles, exists := c.Get("roles")
 		if !exists {
+			if allowPendingReviewerPermission(db, c, permCode) {
+				c.Next()
+				return
+			}
 			utils.Error(c, 403, "没有权限")
 			c.Abort()
 			return
@@ -38,6 +72,10 @@ func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 
 		roleList, ok := roles.([]string)
 		if !ok {
+			if allowPendingReviewerPermission(db, c, permCode) {
+				c.Next()
+				return
+			}
 			utils.Error(c, 403, "没有权限")
 			c.Abort()
 			return
@@ -45,6 +83,10 @@ func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 
 		// 如果用户没有任何角色，直接拒绝访问
 		if len(roleList) == 0 {
+			if allowPendingReviewerPermission(db, c, permCode) {
+				c.Next()
+				return
+			}
 			utils.Error(c, 403, "没有权限：用户未分配角色")
 			c.Abort()
 			return
@@ -59,6 +101,10 @@ func RequirePermission(db *gorm.DB, permCode string) gin.HandlerFunc {
 		}
 
 		if !hasPermission {
+			if allowPendingReviewerPermission(db, c, permCode) {
+				c.Next()
+				return
+			}
 			utils.Error(c, 403, "没有权限")
 			c.Abort()
 			return
