@@ -14,12 +14,12 @@ type TaskHandler struct {
 	db *gorm.DB
 }
 
-func (h *TaskHandler) ensureProjectNotUnderReview(projectID uint) error {
+func (h *TaskHandler) ensureProjectNotUnderReview(c *gin.Context, projectID uint) error {
 	var project model.Project
 	if err := h.db.Select("id", "approval_status").First(&project, projectID).Error; err != nil {
 		return err
 	}
-	if project.ApprovalStatus == "pending" {
+	if project.ApprovalStatus == "pending" && !utils.IsPendingProjectReviewer(h.db, c, projectID) {
 		return fmt.Errorf("项目正在审核，任务暂时不能修改")
 	}
 	return nil
@@ -232,7 +232,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		utils.Error(c, 400, "项目不存在")
 		return
 	}
-	if err := h.ensureProjectNotUnderReview(project.ID); err != nil {
+	if err := h.ensureProjectNotUnderReview(c, project.ID); err != nil {
 		utils.Error(c, 409, err.Error())
 		return
 	}
@@ -390,7 +390,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		utils.Error(c, 403, "没有权限更新该任务")
 		return
 	}
-	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+	if err := h.ensureProjectNotUnderReview(c, task.ProjectID); err != nil {
 		utils.Error(c, 409, err.Error())
 		return
 	}
@@ -720,7 +720,7 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 		utils.Error(c, 403, "没有权限删除该任务")
 		return
 	}
-	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+	if err := h.ensureProjectNotUnderReview(c, task.ProjectID); err != nil {
 		utils.Error(c, 409, err.Error())
 		return
 	}
@@ -760,7 +760,7 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 		utils.Error(c, 403, "没有权限更新该任务")
 		return
 	}
-	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+	if err := h.ensureProjectNotUnderReview(c, task.ProjectID); err != nil {
 		utils.Error(c, 409, err.Error())
 		return
 	}
@@ -821,7 +821,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 		utils.Error(c, 403, "没有权限更新该任务")
 		return
 	}
-	if err := h.ensureProjectNotUnderReview(task.ProjectID); err != nil {
+	if err := h.ensureProjectNotUnderReview(c, task.ProjectID); err != nil {
 		utils.Error(c, 409, err.Error())
 		return
 	}

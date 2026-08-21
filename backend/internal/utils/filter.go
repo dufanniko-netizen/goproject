@@ -166,7 +166,20 @@ func FilterBugsByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm.DB {
 	}
 }
 
-// CheckProjectAccess 检查用户是否有权限访问项目
+// IsPendingProjectReviewer 判断当前用户是否是该项目当前待审批记录指定的审核人。
+func IsPendingProjectReviewer(db *gorm.DB, c *gin.Context, projectID uint) bool {
+	userID := GetUserID(c)
+	if userID == 0 {
+		return false
+	}
+	var count int64
+	db.Model(&model.ProjectApproval{}).
+		Where("project_id = ? AND reviewer_id = ? AND status = ?", projectID, userID, "pending").
+		Count(&count)
+	return count > 0
+}
+
+// CheckProjectAccess 检查用户是否有权限管理项目；当前待审批人拥有审批期间的管理权限。
 func CheckProjectAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
 	// 管理员可以访问所有项目
 	if IsAdmin(c) {
@@ -184,23 +197,12 @@ func CheckProjectAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
 		Where("project_id = ? AND user_id = ? AND deleted_at IS NULL", projectID, userID).
 		Count(&count)
 
-	return count > 0
+	return count > 0 || IsPendingProjectReviewer(db, c, projectID)
 }
 
-// CheckProjectReadAccess 在项目成员权限之外，允许待审批记录指定的直属上级只读查看项目。
+// CheckProjectReadAccess 检查项目查看权限。
 func CheckProjectReadAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
-	if CheckProjectAccess(db, c, projectID) {
-		return true
-	}
-	userID := GetUserID(c)
-	if userID == 0 {
-		return false
-	}
-	var count int64
-	db.Model(&model.ProjectApproval{}).
-		Where("project_id = ? AND reviewer_id = ? AND status = ?", projectID, userID, "pending").
-		Count(&count)
-	return count > 0
+	return CheckProjectAccess(db, c, projectID)
 }
 
 // CheckRequirementAccess 检查用户是否有权限访问需求
