@@ -88,26 +88,10 @@ func FilterRequirementsByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm
 		return query.Where("1 = 0")
 	}
 
-	// 先获取用户参与的项目ID列表（优化：一次查询）
-	projectIDs := GetUserProjectIDs(db, userID)
-
-	// 普通用户只能看到：
-	// 1. 自己创建的需求（creator_id = userID）
-	// 2. 自己负责的需求（assignee_id = userID）
-	// 3. 自己参与的项目中的需求（project_id IN projectIDs）
-	// 使用 OR 条件组合，注意：如果 projectIDs 为空，只检查前两个条件
-	if len(projectIDs) > 0 {
-		return query.Where(
-			"creator_id = ? OR assignee_id = ? OR project_id IN ?",
-			userID, userID, projectIDs,
-		)
-	} else {
-		// 如果用户没有参与任何项目，只检查创建者和负责人
-		return query.Where(
-			"creator_id = ? OR assignee_id = ?",
-			userID, userID,
-		)
-	}
+	return query.Where(
+		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = requirements.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = requirements.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
+		userID, userID, userID, userID, "pending",
+	)
 }
 
 // FilterTasksByUser 过滤任务查询：普通用户只能看到自己创建或参与的任务

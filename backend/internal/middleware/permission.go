@@ -20,6 +20,10 @@ func allowPendingReviewerPermission(db *gorm.DB, c *gin.Context, permCode string
 		"task:create":    true,
 		"task:update":    true,
 		"task:delete":    true,
+		"requirement:read": true,
+		"user:read":        true,
+		"attachment:upload": true,
+		"attachment:delete": true,
 	}
 	if !allowed[permCode] {
 		return false
