@@ -70,8 +70,8 @@ func FilterProjectsByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm.DB 
 	// 普通用户只能看到自己参与的项目
 	// 使用 EXISTS 子查询优化性能
 	return query.Where(
-		"EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ? AND project_members.deleted_at IS NULL)",
-		userID,
+		"EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = projects.id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
+		userID, userID, "pending",
 	)
 }
 
@@ -123,25 +123,10 @@ func FilterTasksByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm.DB {
 		return query.Where("1 = 0")
 	}
 
-	// 先获取用户参与的项目ID列表（优化：一次查询）
-	projectIDs := GetUserProjectIDs(db, userID)
-
-	// 普通用户只能看到：
-	// 1. 自己创建的任务（creator_id = userID）
-	// 2. 自己负责的任务（assignee_id = userID）
-	// 3. 自己参与的项目中的任务（project_id IN projectIDs）
-	if len(projectIDs) > 0 {
-		return query.Where(
-			"creator_id = ? OR assignee_id = ? OR project_id IN ?",
-			userID, userID, projectIDs,
-		)
-	} else {
-		// 如果用户没有参与任何项目，只检查创建者和负责人
-		return query.Where(
-			"creator_id = ? OR assignee_id = ?",
-			userID, userID,
-		)
-	}
+	return query.Where(
+		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = tasks.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = tasks.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
+		userID, userID, userID, userID, "pending",
+	)
 }
 
 // FilterBugsByUser 过滤Bug查询：普通用户只能看到自己创建或参与的Bug
@@ -202,6 +187,22 @@ func CheckProjectAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
 	return count > 0
 }
 
+// CheckProjectReadAccess 在项目成员权限之外，允许待审批记录指定的直属上级只读查看项目。
+func CheckProjectReadAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
+	if CheckProjectAccess(db, c, projectID) {
+		return true
+	}
+	userID := GetUserID(c)
+	if userID == 0 {
+		return false
+	}
+	var count int64
+	db.Model(&model.ProjectApproval{}).
+		Where("project_id = ? AND reviewer_id = ? AND status = ?", projectID, userID, "pending").
+		Count(&count)
+	return count > 0
+}
+
 // CheckRequirementAccess 检查用户是否有权限访问需求
 func CheckRequirementAccess(db *gorm.DB, c *gin.Context, requirementID uint) bool {
 	// 管理员可以访问所有需求
@@ -254,6 +255,18 @@ func CheckTaskAccess(db *gorm.DB, c *gin.Context, taskID uint) bool {
 
 	// 检查是否是项目成员
 	return CheckProjectAccess(db, c, task.ProjectID)
+}
+
+// CheckTaskReadAccess 允许直属上级在审批期间只读查看项目中的任务。
+func CheckTaskReadAccess(db *gorm.DB, c *gin.Context, taskID uint) bool {
+	if CheckTaskAccess(db, c, taskID) {
+		return true
+	}
+	var task model.Task
+	if err := db.Select("id", "project_id").First(&task, taskID).Error; err != nil {
+		return false
+	}
+	return CheckProjectReadAccess(db, c, task.ProjectID)
 }
 
 // CheckBugAccess 检查用户是否有权限访问Bug

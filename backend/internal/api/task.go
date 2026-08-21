@@ -137,7 +137,7 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 	}
 
 	// 权限检查：普通用户只能查看自己创建或参与的任务
-	if !utils.CheckTaskAccess(h.db, c, task.ID) {
+	if !utils.CheckTaskReadAccess(h.db, c, task.ID) {
 		utils.Error(c, 403, "没有权限访问该任务")
 		return
 	}
@@ -1041,8 +1041,8 @@ func (h *TaskHandler) GetTaskHistory(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己创建或参与的任务的历史记录
-	if !utils.CheckTaskAccess(h.db, c, task.ID) {
+	// 权限检查：任务参与人和当前待审批人可以只读查看历史记录
+	if !utils.CheckTaskReadAccess(h.db, c, task.ID) {
 		utils.Error(c, 403, "没有权限查看该任务的历史记录")
 		return
 	}

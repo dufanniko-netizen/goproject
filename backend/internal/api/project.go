@@ -300,8 +300,8 @@ func (h *ProjectHandler) GetProjectStatistics(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己参与的项目
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	// 权限检查：项目成员和当前待审批人可以只读查看统计
+	if !utils.CheckProjectReadAccess(h.db, c, project.ID) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}
@@ -661,8 +661,8 @@ func (h *ProjectHandler) GetProjectMembers(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己参与的项目的成员
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	// 权限检查：项目成员和当前待审批人可以只读查看成员
+	if !utils.CheckProjectReadAccess(h.db, c, project.ID) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}
@@ -687,8 +687,8 @@ func (h *ProjectHandler) GetProjectGantt(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己参与的项目
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	// 权限检查：项目成员和当前待审批人可以只读查看甘特图
+	if !utils.CheckProjectReadAccess(h.db, c, project.ID) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}
@@ -786,8 +786,8 @@ func (h *ProjectHandler) GetProjectProgress(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己参与的项目
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	// 权限检查：项目成员和当前待审批人可以只读查看进度
+	if !utils.CheckProjectReadAccess(h.db, c, project.ID) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}
@@ -1181,8 +1181,8 @@ func (h *ProjectHandler) GetProjectHistory(c *gin.Context) {
 		return
 	}
 
-	// 权限检查：普通用户只能查看自己参与的项目的历史记录
-	if !utils.CheckProjectAccess(h.db, c, project.ID) {
+	// 权限检查：项目成员和当前待审批人可以只读查看历史记录
+	if !utils.CheckProjectReadAccess(h.db, c, project.ID) {
 		utils.Error(c, 403, "没有权限查看该项目的历史记录")
 		return
 	}
