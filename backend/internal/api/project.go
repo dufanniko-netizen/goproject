@@ -132,8 +132,12 @@ func (h *ProjectHandler) ReviewProject(c *gin.Context) {
 		publishedAt = &now
 	}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		projectUpdates := map[string]interface{}{"approval_status": newApprovalStatus, "published_at": publishedAt}
+		if req.Decision == "approved" && project.Status == "wait" {
+			projectUpdates["status"] = "doing"
+		}
 		result := tx.Model(&model.Project{}).Where("id = ? AND approval_status = ?", project.ID, "pending").
-			Updates(map[string]interface{}{"approval_status": newApprovalStatus, "published_at": publishedAt})
+			Updates(projectUpdates)
 		if result.Error != nil {
 			return result.Error
 		}
