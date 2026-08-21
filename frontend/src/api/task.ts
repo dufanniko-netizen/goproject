@@ -26,6 +26,14 @@ export interface Task {
   children?: Task[]
   level: number
   node_type?: 'group' | 'task'
+  task_sequence?: string
+  milestone1?: string
+  milestone2?: string
+  milestone3?: string
+  current_node?: string
+  plan_progress?: number
+  reason_analysis?: string
+  required_support?: string
   created_at?: string
   updated_at?: string
 }
@@ -54,6 +62,14 @@ export interface CreateTaskRequest {
   work_date?: string
   dependency_ids?: number[]
   parent_id?: number
+  task_sequence?: string
+  milestone1?: string
+  milestone2?: string
+  milestone3?: string
+  current_node?: string
+  plan_progress?: number
+  reason_analysis?: string
+  required_support?: string
 }
 
 export interface UpdateTaskStatusRequest {

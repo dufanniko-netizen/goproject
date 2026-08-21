@@ -148,20 +148,28 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 // CreateTask 创建任务
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var req struct {
-		Title          string   `json:"title" binding:"required"`
-		Description    string   `json:"description"`
-		Status         string   `json:"status"`
-		Priority       string   `json:"priority"`
-		ProjectID      uint     `json:"project_id" binding:"required"`
-		RequirementID  *uint    `json:"requirement_id"`
-		AssigneeID     *uint    `json:"assignee_id"`
-		StartDate      *string  `json:"start_date"`
-		EndDate        *string  `json:"end_date"`
-		DueDate        *string  `json:"due_date"`
-		Progress       int      `json:"progress"`
-		EstimatedHours *float64 `json:"estimated_hours"`
-		DependencyIDs  []uint   `json:"dependency_ids"`
-		ParentID       *uint    `json:"parent_id"`
+		Title           string   `json:"title" binding:"required"`
+		Description     string   `json:"description"`
+		Status          string   `json:"status"`
+		Priority        string   `json:"priority"`
+		ProjectID       uint     `json:"project_id" binding:"required"`
+		RequirementID   *uint    `json:"requirement_id"`
+		AssigneeID      *uint    `json:"assignee_id"`
+		StartDate       *string  `json:"start_date"`
+		EndDate         *string  `json:"end_date"`
+		DueDate         *string  `json:"due_date"`
+		Progress        int      `json:"progress"`
+		EstimatedHours  *float64 `json:"estimated_hours"`
+		DependencyIDs   []uint   `json:"dependency_ids"`
+		ParentID        *uint    `json:"parent_id"`
+		TaskSequence    string   `json:"task_sequence"`
+		Milestone1      string   `json:"milestone1"`
+		Milestone2      string   `json:"milestone2"`
+		Milestone3      string   `json:"milestone3"`
+		CurrentNode     string   `json:"current_node"`
+		PlanProgress    int      `json:"plan_progress"`
+		ReasonAnalysis  string   `json:"reason_analysis"`
+		RequiredSupport string   `json:"required_support"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -213,6 +221,10 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		utils.Error(c, 400, "进度值必须在0-100之间")
 		return
 	}
+	if req.PlanProgress < 0 || req.PlanProgress > 100 {
+		utils.Error(c, 400, "任务计划进度必须在0-100之间")
+		return
+	}
 
 	// 验证项目是否存在
 	var project model.Project
@@ -233,7 +245,10 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 
 	level := 1
 	nodeType := "group"
-	if req.ParentID != nil {
+	if project.ProjectType == "automation" {
+		req.ParentID = nil
+		nodeType = "task"
+	} else if req.ParentID != nil {
 		var parent model.Task
 		if err := h.db.First(&parent, *req.ParentID).Error; err != nil {
 			utils.Error(c, 400, "父任务不存在")
@@ -296,22 +311,30 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	task := model.Task{
-		Title:          req.Title,
-		Description:    req.Description,
-		Status:         req.Status,
-		Priority:       req.Priority,
-		ProjectID:      req.ProjectID,
-		RequirementID:  req.RequirementID,
-		CreatorID:      userID.(uint),
-		AssigneeID:     req.AssigneeID,
-		StartDate:      startDate,
-		EndDate:        endDate,
-		DueDate:        dueDate,
-		Progress:       req.Progress,
-		EstimatedHours: req.EstimatedHours,
-		ParentID:       req.ParentID,
-		Level:          level,
-		NodeType:       nodeType,
+		Title:           req.Title,
+		Description:     req.Description,
+		Status:          req.Status,
+		Priority:        req.Priority,
+		ProjectID:       req.ProjectID,
+		RequirementID:   req.RequirementID,
+		CreatorID:       userID.(uint),
+		AssigneeID:      req.AssigneeID,
+		StartDate:       startDate,
+		EndDate:         endDate,
+		DueDate:         dueDate,
+		Progress:        req.Progress,
+		EstimatedHours:  req.EstimatedHours,
+		ParentID:        req.ParentID,
+		Level:           level,
+		NodeType:        nodeType,
+		TaskSequence:    req.TaskSequence,
+		Milestone1:      req.Milestone1,
+		Milestone2:      req.Milestone2,
+		Milestone3:      req.Milestone3,
+		CurrentNode:     req.CurrentNode,
+		PlanProgress:    req.PlanProgress,
+		ReasonAnalysis:  req.ReasonAnalysis,
+		RequiredSupport: req.RequiredSupport,
 	}
 
 	if err := h.db.Create(&task).Error; err != nil {
@@ -376,22 +399,30 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	oldTask := task
 
 	var req struct {
-		Title          *string  `json:"title"`
-		Description    *string  `json:"description"`
-		Status         *string  `json:"status"`
-		Priority       *string  `json:"priority"`
-		ProjectID      *uint    `json:"project_id"`
-		RequirementID  *uint    `json:"requirement_id"`
-		AssigneeID     *uint    `json:"assignee_id"`
-		StartDate      *string  `json:"start_date"`
-		EndDate        *string  `json:"end_date"`
-		DueDate        *string  `json:"due_date"`
-		Progress       *int     `json:"progress"`
-		EstimatedHours *float64 `json:"estimated_hours"`
-		ActualHours    *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
-		WorkDate       *string  `json:"work_date"`    // 工作日期（YYYY-MM-DD），用于资源分配
-		DependencyIDs  *[]uint  `json:"dependency_ids"`
-		ParentID       *uint    `json:"parent_id"`
+		Title           *string  `json:"title"`
+		Description     *string  `json:"description"`
+		Status          *string  `json:"status"`
+		Priority        *string  `json:"priority"`
+		ProjectID       *uint    `json:"project_id"`
+		RequirementID   *uint    `json:"requirement_id"`
+		AssigneeID      *uint    `json:"assignee_id"`
+		StartDate       *string  `json:"start_date"`
+		EndDate         *string  `json:"end_date"`
+		DueDate         *string  `json:"due_date"`
+		Progress        *int     `json:"progress"`
+		EstimatedHours  *float64 `json:"estimated_hours"`
+		ActualHours     *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
+		WorkDate        *string  `json:"work_date"`    // 工作日期（YYYY-MM-DD），用于资源分配
+		DependencyIDs   *[]uint  `json:"dependency_ids"`
+		ParentID        *uint    `json:"parent_id"`
+		TaskSequence    *string  `json:"task_sequence"`
+		Milestone1      *string  `json:"milestone1"`
+		Milestone2      *string  `json:"milestone2"`
+		Milestone3      *string  `json:"milestone3"`
+		CurrentNode     *string  `json:"current_node"`
+		PlanProgress    *int     `json:"plan_progress"`
+		ReasonAnalysis  *string  `json:"reason_analysis"`
+		RequiredSupport *string  `json:"required_support"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -445,7 +476,16 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		}
 		task.ProjectID = *req.ProjectID
 	}
-	if req.ParentID != nil {
+	var taskProject model.Project
+	if err := h.db.First(&taskProject, task.ProjectID).Error; err != nil {
+		utils.Error(c, 400, "项目不存在")
+		return
+	}
+	if taskProject.ProjectType == "automation" {
+		task.ParentID = nil
+		task.Level = 1
+		task.NodeType = "task"
+	} else if req.ParentID != nil {
 		var childCount int64
 		h.db.Model(&model.Task{}).Where("parent_id = ?", task.ID).Count(&childCount)
 		parentChanged := (task.ParentID == nil && *req.ParentID != 0) ||
@@ -545,6 +585,34 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			return
 		}
 		task.Progress = *req.Progress
+	}
+	if req.PlanProgress != nil {
+		if *req.PlanProgress < 0 || *req.PlanProgress > 100 {
+			utils.Error(c, 400, "任务计划进度必须在0-100之间")
+			return
+		}
+		task.PlanProgress = *req.PlanProgress
+	}
+	if req.TaskSequence != nil {
+		task.TaskSequence = *req.TaskSequence
+	}
+	if req.Milestone1 != nil {
+		task.Milestone1 = *req.Milestone1
+	}
+	if req.Milestone2 != nil {
+		task.Milestone2 = *req.Milestone2
+	}
+	if req.Milestone3 != nil {
+		task.Milestone3 = *req.Milestone3
+	}
+	if req.CurrentNode != nil {
+		task.CurrentNode = *req.CurrentNode
+	}
+	if req.ReasonAnalysis != nil {
+		task.ReasonAnalysis = *req.ReasonAnalysis
+	}
+	if req.RequiredSupport != nil {
+		task.RequiredSupport = *req.RequiredSupport
 	}
 	if req.EstimatedHours != nil {
 		if *req.EstimatedHours < 0 {

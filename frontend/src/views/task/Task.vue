@@ -131,7 +131,20 @@
               })"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'level1'">
+                <template v-if="column.key === 'task_sequence'">{{ record.task_sequence || '-' }}</template>
+                <template v-else-if="column.key === 'automation_title'">{{ record.title }}</template>
+                <template v-else-if="column.key === 'automation_start'">{{ record.start_date ? formatDate(record.start_date) : '-' }}</template>
+                <template v-else-if="column.key === 'automation_end'">{{ record.end_date ? formatDate(record.end_date) : '-' }}</template>
+                <template v-else-if="column.key === 'milestone1'">{{ record.milestone1 || '-' }}</template>
+                <template v-else-if="column.key === 'milestone2'">{{ record.milestone2 || '-' }}</template>
+                <template v-else-if="column.key === 'milestone3'">{{ record.milestone3 || '-' }}</template>
+                <template v-else-if="column.key === 'current_node'">{{ record.current_node || '-' }}</template>
+                <template v-else-if="column.key === 'plan_progress'">
+                  <a-progress :percent="record.plan_progress || 0" />
+                </template>
+                <template v-else-if="column.key === 'reason_analysis'">{{ record.reason_analysis || '-' }}</template>
+                <template v-else-if="column.key === 'required_support'">{{ record.required_support || '-' }}</template>
+                <template v-else-if="column.key === 'level1'">
                   <a-button
                     v-if="record.node_type === 'group' && record.level === 1"
                     type="text"
@@ -288,7 +301,33 @@
             </a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="父任务" name="parent_id">
+        <template v-if="isAutomationFormProject">
+          <a-form-item label="任务序号" name="task_sequence">
+            <a-input v-model:value="formData.task_sequence" placeholder="例如：1、1.1、A-01" />
+          </a-form-item>
+          <a-form-item label="重要里程碑1" name="milestone1">
+            <a-input v-model:value="formData.milestone1" placeholder="请输入第一个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="重要里程碑2" name="milestone2">
+            <a-input v-model:value="formData.milestone2" placeholder="请输入第二个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="重要里程碑3" name="milestone3">
+            <a-input v-model:value="formData.milestone3" placeholder="请输入第三个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="当前节点" name="current_node">
+            <a-input v-model:value="formData.current_node" placeholder="请输入当前节点" />
+          </a-form-item>
+          <a-form-item label="任务计划进度" name="plan_progress">
+            <a-slider v-model:value="formData.plan_progress" :min="0" :max="100" :marks="{ 0: '0%', 50: '50%', 100: '100%' }" />
+          </a-form-item>
+          <a-form-item label="原因分析" name="reason_analysis">
+            <a-textarea v-model:value="formData.reason_analysis" :rows="3" placeholder="请输入偏差或问题原因分析" />
+          </a-form-item>
+          <a-form-item label="所需支持" name="required_support">
+            <a-textarea v-model:value="formData.required_support" :rows="3" placeholder="请输入完成任务所需的资源或协调支持" />
+          </a-form-item>
+        </template>
+        <a-form-item v-if="!isAutomationFormProject" label="父任务" name="parent_id">
           <a-select
             v-model:value="formData.parent_id"
             placeholder="不选择则创建一级任务"
@@ -307,6 +346,7 @@
           </a-select>
         </a-form-item>
         <a-alert
+          v-if="!isAutomationFormProject"
           :message="formTaskLevel === 3 ? '当前将创建具体执行任务，会进入甘特图' : `当前将创建${formTaskLevel === 1 ? '一级' : '二级'}任务分类，不进入甘特图`"
           :type="formTaskLevel === 3 ? 'success' : 'info'"
           show-icon
@@ -833,6 +873,24 @@ const baseColumns = [
   { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
 
+const automationColumns = [
+  { title: '任务序号', key: 'task_sequence', width: 100, fixed: 'left' as const },
+  { title: '任务名称', key: 'automation_title', width: 220, ellipsis: true },
+  { title: '任务开始时间', key: 'automation_start', width: 130 },
+  { title: '任务结束时间', key: 'automation_end', width: 130 },
+  { title: '重要里程碑1', key: 'milestone1', width: 180, ellipsis: true },
+  { title: '重要里程碑2', key: 'milestone2', width: 180, ellipsis: true },
+  { title: '重要里程碑3', key: 'milestone3', width: 180, ellipsis: true },
+  { title: '当前节点', key: 'current_node', width: 180, ellipsis: true },
+  { title: '任务计划进度', key: 'plan_progress', width: 150 },
+  { title: '原因分析', key: 'reason_analysis', width: 220, ellipsis: true },
+  { title: '所需支持', key: 'required_support', width: 220, ellipsis: true },
+  { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
+]
+
+const selectedSearchProject = computed(() => projects.value.find(project => project.id === searchForm.project_id))
+const isAutomationTaskView = computed(() => selectedSearchProject.value?.project_type === 'automation')
+
 const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'progress', 'dates']
 const savedVisibleColumns = localStorage.getItem('task_visible_columns')
 const restoreVisibleColumns = () => {
@@ -845,7 +903,9 @@ const restoreVisibleColumns = () => {
 }
 const visibleColumnKeys = ref<string[]>(restoreVisibleColumns())
 const configurableColumns = baseColumns.filter(column => column.key !== 'action')
-const columns = computed(() => baseColumns.filter(column => column.key === 'action' || visibleColumnKeys.value.includes(column.key)))
+const columns = computed(() => isAutomationTaskView.value
+  ? automationColumns
+  : baseColumns.filter(column => column.key === 'action' || visibleColumnKeys.value.includes(column.key)))
 
 watch(visibleColumnKeys, keys => {
   localStorage.setItem('task_visible_columns', JSON.stringify(keys))
@@ -931,8 +991,20 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   actual_hours: undefined,
   work_date: undefined,
   dependency_ids: [],
+  task_sequence: '',
+  milestone1: '',
+  milestone2: '',
+  milestone3: '',
+  current_node: '',
+  plan_progress: 0,
+  reason_analysis: '',
+  required_support: '',
   attachment_ids: [] as number[]
 })
+
+const isAutomationFormProject = computed(() =>
+  projects.value.find(project => project.id === formData.project_id)?.project_type === 'automation'
+)
 
 const formTaskLevel = computed(() => {
   if (!formData.parent_id) return 1
@@ -1165,6 +1237,14 @@ const handleCreate = () => {
   formData.end_date = undefined
   formData.due_date = undefined
   formData.progress = 0
+  formData.task_sequence = ''
+  formData.milestone1 = ''
+  formData.milestone2 = ''
+  formData.milestone3 = ''
+  formData.current_node = ''
+  formData.plan_progress = 0
+  formData.reason_analysis = ''
+  formData.required_support = ''
   formData.attachment_ids = []
   taskAttachments.value = []
   formData.estimated_hours = undefined
@@ -1230,6 +1310,14 @@ const handleEdit = async (record: Task) => {
     formData.due_date = undefined
   }
   formData.progress = record.progress
+  formData.task_sequence = record.task_sequence || ''
+  formData.milestone1 = record.milestone1 || ''
+  formData.milestone2 = record.milestone2 || ''
+  formData.milestone3 = record.milestone3 || ''
+  formData.current_node = record.current_node || ''
+  formData.plan_progress = record.plan_progress || 0
+  formData.reason_analysis = record.reason_analysis || ''
+  formData.required_support = record.required_support || ''
   formData.estimated_hours = record.estimated_hours
   formData.actual_hours = record.actual_hours
   formData.work_date = undefined
@@ -1287,7 +1375,15 @@ const handleSubmit = async () => {
       estimated_hours: formData.estimated_hours,
       actual_hours: formData.actual_hours,
       work_date: formData.work_date && formData.work_date.isValid() ? formData.work_date.format('YYYY-MM-DD') : undefined,
-      dependency_ids: formData.dependency_ids
+      dependency_ids: formData.dependency_ids,
+      task_sequence: formData.task_sequence,
+      milestone1: formData.milestone1,
+      milestone2: formData.milestone2,
+      milestone3: formData.milestone3,
+      current_node: formData.current_node,
+      plan_progress: formData.plan_progress,
+      reason_analysis: formData.reason_analysis,
+      required_support: formData.required_support
     }
     let taskId: number
     if (formData.id) {
