@@ -70,8 +70,8 @@ func FilterProjectsByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm.DB 
 	// 普通用户只能看到自己参与的项目
 	// 使用 EXISTS 子查询优化性能
 	return query.Where(
-		"EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = projects.id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
-		userID, userID, "pending",
+		"EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = projects.id AND project_approvals.reviewer_id = ? AND project_approvals.status IN ?)",
+		userID, userID, []string{"pending", "approved"},
 	)
 }
 
@@ -89,8 +89,8 @@ func FilterRequirementsByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm
 	}
 
 	return query.Where(
-		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = requirements.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = requirements.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
-		userID, userID, userID, userID, "pending",
+		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = requirements.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = requirements.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status IN ?)",
+		userID, userID, userID, userID, []string{"pending", "approved"},
 	)
 }
 
@@ -108,8 +108,8 @@ func FilterTasksByUser(db *gorm.DB, c *gin.Context, query *gorm.DB) *gorm.DB {
 	}
 
 	return query.Where(
-		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = tasks.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = tasks.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status = ?)",
-		userID, userID, userID, userID, "pending",
+		"creator_id = ? OR assignee_id = ? OR EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = tasks.project_id AND project_members.user_id = ? AND project_members.deleted_at IS NULL) OR EXISTS (SELECT 1 FROM project_approvals WHERE project_approvals.project_id = tasks.project_id AND project_approvals.reviewer_id = ? AND project_approvals.status IN ?)",
+		userID, userID, userID, userID, []string{"pending", "approved"},
 	)
 }
 
@@ -163,6 +163,19 @@ func IsPendingProjectReviewer(db *gorm.DB, c *gin.Context, projectID uint) bool 
 	return count > 0
 }
 
+// IsProjectReviewer 判断当前用户是否是待审批或已通过项目的审核人。
+func IsProjectReviewer(db *gorm.DB, c *gin.Context, projectID uint) bool {
+	userID := GetUserID(c)
+	if userID == 0 {
+		return false
+	}
+	var count int64
+	db.Model(&model.ProjectApproval{}).
+		Where("project_id = ? AND reviewer_id = ? AND status IN ?", projectID, userID, []string{"pending", "approved"}).
+		Count(&count)
+	return count > 0
+}
+
 // CheckProjectAccess 检查用户是否有权限管理项目；当前待审批人拥有审批期间的管理权限。
 func CheckProjectAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
 	// 管理员可以访问所有项目
@@ -181,7 +194,7 @@ func CheckProjectAccess(db *gorm.DB, c *gin.Context, projectID uint) bool {
 		Where("project_id = ? AND user_id = ? AND deleted_at IS NULL", projectID, userID).
 		Count(&count)
 
-	return count > 0 || IsPendingProjectReviewer(db, c, projectID)
+	return count > 0 || IsProjectReviewer(db, c, projectID)
 }
 
 // CheckProjectReadAccess 检查项目查看权限。

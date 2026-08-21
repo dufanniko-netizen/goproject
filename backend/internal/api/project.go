@@ -140,9 +140,18 @@ func (h *ProjectHandler) ReviewProject(c *gin.Context) {
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
-		return tx.Model(&model.ProjectApproval{}).
+		if err := tx.Model(&model.ProjectApproval{}).
 			Where("project_id = ? AND reviewer_id = ? AND status = ?", project.ID, userID, "pending").
-			Updates(map[string]interface{}{"status": req.Decision, "comment": req.Comment, "reviewer_id": userID, "reviewed_at": now}).Error
+			Updates(map[string]interface{}{"status": req.Decision, "comment": req.Comment, "reviewer_id": userID, "reviewed_at": now}).Error; err != nil {
+			return err
+		}
+		if req.Decision == "approved" {
+			member := model.ProjectMember{ProjectID: project.ID, UserID: userID, Role: "member"}
+			if err := tx.Where("project_id = ? AND user_id = ?", project.ID, userID).FirstOrCreate(&member).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		utils.Error(c, 409, "项目已被其他审核人处理")
