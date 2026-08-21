@@ -233,8 +233,8 @@
                       <template #overlay>
                         <a-menu @click="(e: any) => handleActionMenu(record, e.key as string)">
                           <a-menu-item v-if="record.node_type === 'group' && (record.level || 1) < 3" key="add-child">添加下级</a-menu-item>
-                          <a-menu-item v-if="record.node_type !== 'group'" key="progress">更新进度</a-menu-item>
-                          <a-sub-menu v-if="record.node_type !== 'group'" key="status" title="修改状态">
+                          <a-menu-item v-if="record.node_type !== 'group' && record.project?.project_type !== 'automation'" key="progress">更新进度</a-menu-item>
+                          <a-sub-menu v-if="record.node_type !== 'group' && record.project?.project_type !== 'automation'" key="status" title="修改状态">
                             <a-menu-item key="status:wait">未开始</a-menu-item>
                             <a-menu-item key="status:doing">进行中</a-menu-item>
                             <a-menu-item key="status:done">已完成</a-menu-item>
@@ -275,7 +275,7 @@
         <a-form-item label="任务标题" name="title">
           <a-input v-model:value="formData.title" placeholder="请输入任务标题" />
         </a-form-item>
-        <a-form-item label="任务描述" name="description">
+        <a-form-item v-if="!isAutomationFormProject" label="任务描述" name="description">
           <MarkdownEditor
             ref="descriptionEditorRef"
             v-model="formData.description"
@@ -352,7 +352,7 @@
           show-icon
           style="margin-bottom: 16px"
         />
-        <a-form-item label="关联需求" name="requirement_id">
+        <a-form-item v-if="!isAutomationFormProject" label="关联需求" name="requirement_id">
           <a-select
             v-model:value="formData.requirement_id"
             placeholder="选择需求（可选）"
@@ -371,7 +371,7 @@
             </a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="状态" name="status">
+        <a-form-item v-if="!isAutomationFormProject" label="状态" name="status">
           <a-select v-model:value="formData.status">
             <a-select-option value="wait">未开始</a-select-option>
             <a-select-option value="doing">进行中</a-select-option>
@@ -381,7 +381,7 @@
             <a-select-option value="closed">已延期</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="优先级" name="priority">
+        <a-form-item v-if="!isAutomationFormProject" label="优先级" name="priority">
           <a-select v-model:value="formData.priority">
             <a-select-option value="low">低</a-select-option>
             <a-select-option value="medium">中</a-select-option>
@@ -389,7 +389,7 @@
             <a-select-option value="urgent">紧急</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="负责人" name="assignee_id">
+        <a-form-item v-if="!isAutomationFormProject" label="负责人" name="assignee_id">
           <a-select
             v-model:value="formData.assignee_id"
             placeholder="选择负责人（可选）"
@@ -422,7 +422,7 @@
             format="YYYY-MM-DD"
           />
         </a-form-item>
-        <a-form-item label="截止日期" name="due_date">
+        <a-form-item v-if="!isAutomationFormProject" label="截止日期" name="due_date">
           <a-date-picker
             v-model:value="formData.due_date"
             placeholder="选择截止日期"
@@ -430,7 +430,7 @@
             format="YYYY-MM-DD"
           />
         </a-form-item>
-        <a-form-item label="进度" name="progress">
+        <a-form-item v-if="!isAutomationFormProject" label="进度" name="progress">
           <a-slider
             v-model:value="formData.progress"
             :min="0"
@@ -439,7 +439,7 @@
           />
           <span style="margin-left: 8px">{{ formData.progress }}%</span>
         </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
+        <a-form-item v-if="!isAutomationFormProject" label="预估工时" name="estimated_hours">
           <a-input-number
             v-model:value="formData.estimated_hours"
             placeholder="预估工时（小时）"
@@ -448,7 +448,7 @@
             style="width: 100%"
           />
         </a-form-item>
-        <a-form-item label="实际工时" name="actual_hours">
+        <a-form-item v-if="!isAutomationFormProject" label="实际工时" name="actual_hours">
           <a-input-number
             v-model:value="formData.actual_hours"
             placeholder="实际工时（小时）"
@@ -458,7 +458,7 @@
           />
           <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配</span>
         </a-form-item>
-        <a-form-item label="工作日期" name="work_date" v-if="formData.actual_hours">
+        <a-form-item v-if="!isAutomationFormProject && formData.actual_hours" label="工作日期" name="work_date">
           <a-date-picker
             v-model:value="formData.work_date"
             placeholder="选择工作日期（可选）"
@@ -467,7 +467,7 @@
           />
           <span style="margin-left: 8px; color: #999">不填则使用任务开始日期或今天</span>
         </a-form-item>
-        <a-form-item label="附件">
+        <a-form-item v-if="!isAutomationFormProject" label="附件">
           <AttachmentUpload
             v-if="formData.project_id && formData.project_id > 0"
             :project-id="formData.project_id"
@@ -476,7 +476,7 @@
           />
           <span v-else style="color: #999;">请先选择项目后再上传附件</span>
         </a-form-item>
-        <a-form-item label="依赖任务" name="dependency_ids">
+        <a-form-item v-if="!isAutomationFormProject" label="依赖任务" name="dependency_ids">
           <a-select
             v-model:value="formData.dependency_ids"
             mode="multiple"
@@ -570,8 +570,8 @@
           <div style="margin-bottom: 16px; text-align: right">
             <a-space>
               <a-button @click="handleDetailEdit">编辑</a-button>
-              <a-button @click="handleDetailUpdateProgress">更新进度</a-button>
-              <a-dropdown>
+              <a-button v-if="detailTask.project?.project_type !== 'automation'" @click="handleDetailUpdateProgress">更新进度</a-button>
+              <a-dropdown v-if="detailTask.project?.project_type !== 'automation'">
                 <a-button>
                   状态 <DownOutlined />
                 </a-button>
