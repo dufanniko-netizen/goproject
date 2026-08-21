@@ -90,6 +90,9 @@
                 <template v-else-if="column.key === 'department'">
                   {{ record.department?.name || '-' }}
                 </template>
+                <template v-else-if="column.key === 'supervisor'">
+                  {{ record.supervisor ? `${record.supervisor.username}(${record.supervisor.nickname || '-'})` : '未设置' }}
+                </template>
                 <template v-else-if="column.key === 'roles'">
                   <a-tag
                     v-for="role in record.roles"
@@ -182,6 +185,27 @@
             show-search
             :tree-node-filter-prop="'name'"
           />
+        </a-form-item>
+        <a-form-item label="直属上级" name="supervisor_id">
+          <a-select
+            v-model:value="formData.supervisor_id"
+            placeholder="请选择直属上级"
+            show-search
+            option-filter-prop="label"
+          >
+            <a-select-option :value="0" label="无直属上级">无直属上级</a-select-option>
+            <a-select-option
+              v-for="user in availableSupervisorOptions"
+              :key="user.id"
+              :value="user.id"
+              :label="`${user.username} ${user.nickname || ''}`"
+            >
+              {{ user.username }}({{ user.nickname || '-' }})
+            </a-select-option>
+          </a-select>
+          <div style="font-size: 12px; color: #999; margin-top: 4px">
+            自动化项目提交后会自动发送给该用户审核
+          </div>
         </a-form-item>
         <a-form-item label="状态" name="status">
           <a-select v-model:value="formData.status" placeholder="选择状态">
@@ -346,6 +370,7 @@ const searchFormVisible = ref(false) // 搜索栏显示/隐藏状态，默认折
 const submitting = ref(false)
 const roleSubmitting = ref(false)
 const users = ref<User[]>([])
+const supervisorOptions = ref<User[]>([])
 const departments = ref<Department[]>([])
 const roles = ref<Role[]>([])
 
@@ -405,6 +430,11 @@ const columns = [
     width: 120
   },
   {
+    title: '直属上级',
+    key: 'supervisor',
+    width: 180
+  },
+  {
     title: '角色',
     key: 'roles',
     width: 200
@@ -432,8 +462,13 @@ const formData = reactive<CreateUserRequest & { id?: number; password?: string }
   email: '',
   phone: '',
   department_id: undefined,
+  supervisor_id: 0,
   status: 1
 })
+
+const availableSupervisorOptions = computed(() =>
+  supervisorOptions.value.filter(user => user.id !== formData.id && user.status === 1)
+)
 
 // 验证密码强度：必须包含大小写字母和数字
 const validatePasswordStrength = (_rule: any, value: string) => {
@@ -549,6 +584,15 @@ const loadUsers = async () => {
   }
 }
 
+const loadSupervisorOptions = async () => {
+  try {
+    const response = await getUsers({ page: 1, size: 1000 })
+    supervisorOptions.value = response.list
+  } catch (error: any) {
+    console.error('加载直属上级候选人失败:', error)
+  }
+}
+
 // 加载部门列表
 const loadDepartments = async () => {
   try {
@@ -602,6 +646,7 @@ const handleCreate = () => {
     email: '',
     phone: '',
     department_id: undefined,
+    supervisor_id: 0,
     status: 1
   })
   delete formData.id
@@ -619,6 +664,7 @@ const handleEdit = (record: User) => {
     email: record.email || '',
     phone: record.phone || '',
     department_id: record.department_id,
+    supervisor_id: record.supervisor_id || 0,
     status: record.status
   })
   modalVisible.value = true
@@ -646,6 +692,7 @@ const handleSubmit = async () => {
     
     modalVisible.value = false
     loadUsers()
+    loadSupervisorOptions()
   } catch (error: any) {
     if (error.errorFields) {
       return
@@ -867,6 +914,7 @@ const handleCloseBindWeChatModal = () => {
 
 onMounted(() => {
   loadUsers()
+  loadSupervisorOptions()
   loadDepartments()
   loadRoles()
 })

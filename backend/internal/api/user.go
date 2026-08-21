@@ -27,7 +27,7 @@ func NewUserHandler(db *gorm.DB) *UserHandler {
 // GetUsers 获取用户列表
 func (h *UserHandler) GetUsers(c *gin.Context) {
 	var users []model.User
-	query := h.db.Preload("Department").Preload("Roles")
+	query := h.db.Preload("Department").Preload("Supervisor").Preload("Roles")
 
 	// 搜索
 	if keyword := c.Query("keyword"); keyword != "" {
@@ -77,7 +77,7 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 func (h *UserHandler) GetUser(c *gin.Context) {
 	id := c.Param("id")
 	var user model.User
-	if err := h.db.Preload("Department").Preload("Roles").First(&user, id).Error; err != nil {
+	if err := h.db.Preload("Department").Preload("Supervisor").Preload("Roles").First(&user, id).Error; err != nil {
 		utils.Error(c, 404, "用户不存在")
 		return
 	}
@@ -96,11 +96,23 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		Avatar       string `json:"avatar"`
 		Status       int    `json:"status"`
 		DepartmentID *uint  `json:"department_id"`
+		SupervisorID *uint  `json:"supervisor_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, 400, "参数错误: "+err.Error())
 		return
+	}
+	if req.SupervisorID != nil {
+		if *req.SupervisorID == 0 {
+			req.SupervisorID = nil
+		} else {
+			var supervisor model.User
+			if err := h.db.Where("id = ? AND status = ?", *req.SupervisorID, 1).First(&supervisor).Error; err != nil {
+				utils.Error(c, 400, "选择的直属上级不存在或已被禁用")
+				return
+			}
+		}
 	}
 
 	// 检查用户名是否已存在
@@ -119,6 +131,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		Avatar:       req.Avatar,
 		Status:       req.Status,
 		DepartmentID: req.DepartmentID,
+		SupervisorID: req.SupervisorID,
 	}
 
 	// 如果提供了密码，则验证密码强度并加密存储
@@ -157,7 +170,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	}
 
 	// 重新加载用户（包含关联数据）
-	h.db.Preload("Department").Preload("Roles").First(&user, user.ID)
+	h.db.Preload("Department").Preload("Supervisor").Preload("Roles").First(&user, user.ID)
 
 	utils.Success(c, user)
 }
@@ -180,6 +193,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		Avatar       string `json:"avatar"`
 		Status       *int   `json:"status"`
 		DepartmentID *uint  `json:"department_id"`
+		SupervisorID *uint  `json:"supervisor_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -220,6 +234,22 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	if req.DepartmentID != nil {
 		user.DepartmentID = req.DepartmentID
 	}
+	if req.SupervisorID != nil {
+		if *req.SupervisorID == user.ID {
+			utils.Error(c, 400, "直属上级不能是用户本人")
+			return
+		}
+		if *req.SupervisorID == 0 {
+			user.SupervisorID = nil
+		} else {
+			var supervisor model.User
+			if err := h.db.Where("id = ? AND status = ?", *req.SupervisorID, 1).First(&supervisor).Error; err != nil {
+				utils.Error(c, 400, "选择的直属上级不存在或已被禁用")
+				return
+			}
+			user.SupervisorID = req.SupervisorID
+		}
+	}
 
 	// 如果提供了新密码，则验证密码强度并加密更新
 	if req.Password != "" {
@@ -242,7 +272,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	}
 
 	// 重新加载用户（包含关联数据）
-	h.db.Preload("Department").Preload("Roles").First(&user, user.ID)
+	h.db.Preload("Department").Preload("Supervisor").Preload("Roles").First(&user, user.ID)
 
 	utils.Success(c, user)
 }

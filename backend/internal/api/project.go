@@ -18,16 +18,15 @@ func NewProjectHandler(db *gorm.DB) *ProjectHandler {
 	return &ProjectHandler{db: db}
 }
 
-func (h *ProjectHandler) isDirector(userID uint) bool {
+func (h *ProjectHandler) canReviewProject(userID, projectID uint) bool {
 	var count int64
-	h.db.Table("user_roles").
-		Joins("JOIN roles ON roles.id = user_roles.role_id").
-		Where("user_roles.user_id = ? AND (roles.name = ? OR roles.code = ?)", userID, "主任", "director").
+	h.db.Model(&model.ProjectApproval{}).
+		Where("project_id = ? AND reviewer_id = ? AND status = ?", projectID, userID, "pending").
 		Count(&count)
 	return count > 0
 }
 
-// SubmitProjectApproval 将自动化项目及其现有任务整体提交给主任审核。
+// SubmitProjectApproval 将自动化项目及其现有任务整体提交给申请人的直属上级审核。
 func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 	var project model.Project
 	if err := h.db.First(&project, c.Param("id")).Error; err != nil {
@@ -47,11 +46,18 @@ func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 		utils.Error(c, 409, "当前状态不能提交审核")
 		return
 	}
-	var directorCount int64
-	h.db.Table("user_roles").Joins("JOIN roles ON roles.id = user_roles.role_id").
-		Where("roles.name = ? OR roles.code = ?", "主任", "director").Count(&directorCount)
-	if directorCount == 0 {
-		utils.Error(c, 409, "系统尚未配置主任角色用户")
+	var submitter model.User
+	if err := h.db.First(&submitter, userID).Error; err != nil {
+		utils.Error(c, 404, "项目申请人不存在")
+		return
+	}
+	if submitter.SupervisorID == nil {
+		utils.Error(c, 409, "尚未配置直属上级，请联系管理员在用户管理中设置")
+		return
+	}
+	var supervisor model.User
+	if err := h.db.Where("id = ? AND status = ?", *submitter.SupervisorID, 1).First(&supervisor).Error; err != nil {
+		utils.Error(c, 409, "直属上级不存在或已被禁用，请联系管理员重新设置")
 		return
 	}
 	now := time.Now()
@@ -62,7 +68,7 @@ func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 			return err
 		}
 		return tx.Create(&model.ProjectApproval{
-			ProjectID: project.ID, SubmitterID: userID, Status: "pending", SubmittedAt: now,
+			ProjectID: project.ID, SubmitterID: userID, ReviewerID: submitter.SupervisorID, Status: "pending", SubmittedAt: now,
 		}).Error
 	})
 	if err != nil {
@@ -72,30 +78,23 @@ func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 	utils.Success(c, project)
 }
 
-// GetPendingProjectApprovals 主任查看待审核自动化项目。
+// GetPendingProjectApprovals 当前用户查看分配给自己的待审核自动化项目。
 func (h *ProjectHandler) GetPendingProjectApprovals(c *gin.Context) {
 	userID := utils.GetUserID(c)
-	if !h.isDirector(userID) && !utils.IsAdmin(c) {
-		utils.Error(c, 403, "只有主任可以审核项目")
-		return
-	}
 	var projects []model.Project
 	if err := h.db.Preload("Creator").Preload("Tasks", func(db *gorm.DB) *gorm.DB { return db.Order("level, id") }).
-		Where("project_type = ? AND approval_status = ?", "automation", "pending").
-		Order("submitted_at ASC").Find(&projects).Error; err != nil {
+		Joins("JOIN project_approvals ON project_approvals.project_id = projects.id").
+		Where("projects.project_type = ? AND projects.approval_status = ? AND project_approvals.status = ? AND project_approvals.reviewer_id = ?", "automation", "pending", "pending", userID).
+		Order("projects.submitted_at ASC").Find(&projects).Error; err != nil {
 		utils.Error(c, utils.CodeError, "查询待审核项目失败")
 		return
 	}
 	utils.Success(c, projects)
 }
 
-// ReviewProject 主任通过或驳回项目。首次完成审核者生效。
+// ReviewProject 直属上级通过或驳回项目。
 func (h *ProjectHandler) ReviewProject(c *gin.Context) {
 	userID := utils.GetUserID(c)
-	if !h.isDirector(userID) && !utils.IsAdmin(c) {
-		utils.Error(c, 403, "只有主任可以审核项目")
-		return
-	}
 	var req struct {
 		Decision string `json:"decision" binding:"required"`
 		Comment  string `json:"comment"`
@@ -121,6 +120,10 @@ func (h *ProjectHandler) ReviewProject(c *gin.Context) {
 		utils.Error(c, 409, "项目不在待审核状态")
 		return
 	}
+	if !h.canReviewProject(userID, project.ID) {
+		utils.Error(c, 403, "该项目未提交给你审核")
+		return
+	}
 	now := time.Now()
 	newApprovalStatus := "rejected"
 	var publishedAt interface{}
@@ -138,7 +141,7 @@ func (h *ProjectHandler) ReviewProject(c *gin.Context) {
 			return gorm.ErrRecordNotFound
 		}
 		return tx.Model(&model.ProjectApproval{}).
-			Where("project_id = ? AND status = ?", project.ID, "pending").
+			Where("project_id = ? AND reviewer_id = ? AND status = ?", project.ID, userID, "pending").
 			Updates(map[string]interface{}{"status": req.Decision, "comment": req.Comment, "reviewer_id": userID, "reviewed_at": now}).Error
 	})
 	if err != nil {
@@ -156,7 +159,7 @@ func (h *ProjectHandler) GetProjectApprovals(c *gin.Context) {
 		return
 	}
 	userID := utils.GetUserID(c)
-	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.isDirector(userID) && !utils.IsAdmin(c) {
+	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.canReviewProject(userID, project.ID) && !utils.IsAdmin(c) {
 		utils.Error(c, 403, "没有权限查看审核记录")
 		return
 	}
@@ -272,7 +275,7 @@ func (h *ProjectHandler) GetProject(c *gin.Context) {
 	}
 
 	// 权限检查：普通用户只能查看自己参与的项目
-	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.isDirector(utils.GetUserID(c)) {
+	if !utils.CheckProjectAccess(h.db, c, project.ID) && !h.canReviewProject(utils.GetUserID(c), project.ID) {
 		utils.Error(c, 403, "没有权限访问该项目")
 		return
 	}

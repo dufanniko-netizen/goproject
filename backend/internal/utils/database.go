@@ -6,7 +6,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // 纯Go SQLite驱动，支持静态编译，必须在 gorm.io/driver/sqlite 之前导入
-	
+
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -77,7 +77,8 @@ func InitDB() (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: gormLogger,
+		Logger:                                   gormLogger,
+		DisableForeignKeyConstraintWhenMigrating: config.AppConfig.Database.Type == "sqlite",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)

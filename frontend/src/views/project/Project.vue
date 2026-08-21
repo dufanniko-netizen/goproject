@@ -8,8 +8,8 @@
           <div>
               <a-page-header title="项目管理">
                 <template #extra>
-                  <a-badge v-if="isDirector" :count="pendingApprovalProjects.length" :offset="[-6, 2]">
-                    <a-button @click="openApprovalCenter">项目审核</a-button>
+                  <a-badge :count="pendingApprovalProjects.length" :offset="[-6, 2]">
+                    <a-button @click="openApprovalCenter">待我审核</a-button>
                   </a-badge>
                   <a-button type="primary" @click="handleCreateProject">
                     <template #icon><PlusOutlined /></template>
@@ -184,7 +184,7 @@
         <a-form-item label="项目类型" name="project_type">
           <a-radio-group v-model:value="projectFormData.project_type" :disabled="!!projectFormData.id">
             <a-radio value="smart_warehouse">智慧仓库（无需审核）</a-radio>
-            <a-radio value="automation">自动化项目（主任审核）</a-radio>
+            <a-radio value="automation">自动化项目（直属上级审核）</a-radio>
           </a-radio-group>
         </a-form-item>
         <a-form-item label="标签">
@@ -721,7 +721,7 @@
       </a-form>
     </a-modal>
 
-    <a-modal v-model:open="approvalCenterVisible" title="自动化项目审核" width="1000px" :footer="null">
+    <a-modal v-model:open="approvalCenterVisible" title="待我审核的自动化项目" width="1000px" :footer="null">
       <a-table :columns="approvalColumns" :data-source="pendingApprovalProjects" :loading="approvalLoading" row-key="id" :pagination="false">
         <template #expandedRowRender="{ record }">
           <a-descriptions bordered size="small" :column="2" style="margin-bottom: 12px">
@@ -811,8 +811,6 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-
-const isDirector = computed(() => authStore.user?.roles?.includes('director') || false)
 
 const projectLoading = ref(false)
 const memberLoading = ref(false)
@@ -982,7 +980,6 @@ const loadProjects = async () => {
 }
 
 const loadPendingApprovals = async () => {
-  if (!isDirector.value) return
   approvalLoading.value = true
   try {
     pendingApprovalProjects.value = await getPendingProjectApprovals()
@@ -1001,7 +998,7 @@ const openApprovalCenter = async () => {
 const handleSubmitApproval = async (project: Project) => {
   try {
     await submitProjectApproval(project.id)
-    message.success('已提交主任审核，审核期间项目和任务将锁定')
+    message.success('已提交直属上级审核，审核期间项目和任务将锁定')
     await loadProjects()
     await loadPendingApprovals()
   } catch (error: any) {
@@ -1036,7 +1033,7 @@ const confirmReject = async () => {
 }
 
 const getApprovalStatusText = (status?: string) => ({
-  draft: '草稿', pending: '待主任审核', rejected: '已驳回', published: '已发布'
+  draft: '草稿', pending: '待直属上级审核', rejected: '已驳回', published: '已发布'
 }[status || 'published'] || status)
 
 const getApprovalStatusColor = (status?: string) => ({
@@ -1850,6 +1847,7 @@ onMounted(() => {
   loadProjects()
   loadUsers()
   loadTags()
+  loadPendingApprovals()
   
   // 检查URL参数edit
   if (route.query.edit) {
