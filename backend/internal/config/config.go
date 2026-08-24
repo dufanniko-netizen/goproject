@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -12,6 +13,7 @@ type Config struct {
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	WeChat   WeChatConfig   `mapstructure:"wechat"`
 	Upload   UploadConfig   `mapstructure:"upload"`
+	Email    EmailConfig    `mapstructure:"email"`
 }
 
 type ServerConfig struct {
@@ -58,6 +60,19 @@ type UploadConfig struct {
 	AllowedTypes []string `mapstructure:"allowed_types"` // 允许的文件类型（MIME类型），空数组表示允许所有类型
 }
 
+type EmailConfig struct {
+	Enabled        bool   `mapstructure:"enabled"`
+	Host           string `mapstructure:"host"`
+	Port           int    `mapstructure:"port"`
+	Username       string `mapstructure:"username"`
+	Password       string `mapstructure:"password"`
+	FromAddress    string `mapstructure:"from_address"`
+	FromName       string `mapstructure:"from_name"`
+	BaseURL        string `mapstructure:"base_url"`
+	TLSMode        string `mapstructure:"tls_mode"` // starttls, implicit, none
+	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
+}
+
 var AppConfig *Config
 
 func LoadConfig(configPath string) error {
@@ -72,6 +87,7 @@ func LoadConfig(configPath string) error {
 	setDefaults()
 
 	// 读取环境变量
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -109,5 +125,16 @@ func setDefaults() {
 	viper.SetDefault("upload.storage_path", "uploads")                    // 默认存储路径
 	viper.SetDefault("upload.max_file_size", 100*1024*1024)               // 默认 100MB (104857600 字节)
 	viper.SetDefault("upload.allowed_types", []string{})                  // 空数组表示允许所有类型
+
+	viper.SetDefault("email.enabled", false)
+	viper.SetDefault("email.host", "")
+	viper.SetDefault("email.port", 587)
+	viper.SetDefault("email.username", "")
+	viper.SetDefault("email.password", "")
+	viper.SetDefault("email.from_address", "")
+	viper.SetDefault("email.from_name", "项目管理系统")
+	viper.SetDefault("email.base_url", "")
+	viper.SetDefault("email.tls_mode", "starttls")
+	viper.SetDefault("email.timeout_seconds", 10)
 }
 

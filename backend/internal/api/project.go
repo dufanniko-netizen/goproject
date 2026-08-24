@@ -1,10 +1,15 @@
 package api
 
 import (
+	"fmt"
+	"log"
+	"strings"
 	"time"
 
+	"project-management/internal/config"
 	"project-management/internal/model"
 	"project-management/internal/utils"
+	"project-management/pkg/mailer"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -60,6 +65,10 @@ func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 		utils.Error(c, 409, "直属上级不存在或已被禁用，请联系管理员重新设置")
 		return
 	}
+	if config.AppConfig.Email.Enabled && strings.TrimSpace(supervisor.Email) == "" {
+		utils.Error(c, 409, "直属上级尚未配置邮箱，请联系管理员补充邮箱后再提交")
+		return
+	}
 	now := time.Now()
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		project.ApprovalStatus = "pending"
@@ -75,6 +84,47 @@ func (h *ProjectHandler) SubmitProjectApproval(c *gin.Context) {
 		utils.Error(c, utils.CodeError, "提交审核失败")
 		return
 	}
+	var taskCount int64
+	h.db.Model(&model.Task{}).Where("project_id = ?", project.ID).Count(&taskCount)
+	baseURL := strings.TrimRight(config.AppConfig.Email.BaseURL, "/")
+	if baseURL == "" {
+		scheme := c.GetHeader("X-Forwarded-Proto")
+		if scheme == "" {
+			scheme = "http"
+		}
+		baseURL = scheme + "://" + c.Request.Host
+	}
+	startDate := ""
+	if project.StartDate != nil {
+		startDate = project.StartDate.Format("2006-01-02")
+	}
+	endDate := ""
+	if project.EndDate != nil {
+		endDate = project.EndDate.Format("2006-01-02")
+	}
+	submitterName := submitter.Nickname
+	if submitterName == "" {
+		submitterName = submitter.Username
+	}
+	supervisorName := supervisor.Nickname
+	if supervisorName == "" {
+		supervisorName = supervisor.Username
+	}
+	notification := mailer.ProjectApprovalNotification{
+		RecipientEmail: supervisor.Email,
+		RecipientName:  supervisorName,
+		ProjectName:    project.Name,
+		SubmitterName:  submitterName,
+		TaskCount:      taskCount,
+		ProjectURL:     fmt.Sprintf("%s/project/%d", baseURL, project.ID),
+		StartDate:      startDate,
+		EndDate:        endDate,
+	}
+	go func() {
+		if err := mailer.SendProjectApproval(notification); err != nil {
+			log.Printf("发送项目审核邮件失败(project_id=%d, reviewer_id=%d): %v", project.ID, supervisor.ID, err)
+		}
+	}()
 	utils.Success(c, project)
 }
 
