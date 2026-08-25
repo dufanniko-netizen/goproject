@@ -98,7 +98,7 @@ func BuildWorkbook(project model.Project, contact model.ExternalTaskContact, bat
 	defer f.Close()
 	const sheet = "任务反馈"
 	f.SetSheetName("Sheet1", sheet)
-	headers := []string{"批次号", "任务ID", "项目", "乙方负责人", "任务名称", "原开始日期", "原结束日期", "今日进度(0-100，必填)", "任务状态（必填）", "今日进展说明（必填）", "申请开始日期", "申请结束日期", "时间调整原因"}
+	headers := []string{"批次号", "任务ID", "项目", "乙方负责人", "任务名称", "原开始日期", "原结束日期", "今日进度(0-100，必填)", "任务状态（必填）", "今日进展说明（有进展时填写）", "申请开始日期", "申请结束日期", "时间调整原因"}
 	for i, header := range headers {
 		name, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet, name, header)
@@ -115,7 +115,7 @@ func BuildWorkbook(project model.Project, contact model.ExternalTaskContact, bat
 	f.SetColWidth(sheet, "C", "G", 20)
 	f.SetColWidth(sheet, "H", "M", 18)
 	requiredStyle, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"FFF2CC"}, Pattern: 1}, Font: &excelize.Font{Bold: true, Color: "9C5700"}})
-	_ = f.SetCellStyle(sheet, "H1", "J1", requiredStyle)
+	_ = f.SetCellStyle(sheet, "H1", "I1", requiredStyle)
 	lastRow := len(tasks) + 1
 	progressValidation := excelize.NewDataValidation(false)
 	progressValidation.SetSqref(fmt.Sprintf("H2:H%d", lastRow))
@@ -129,16 +129,9 @@ func BuildWorkbook(project model.Project, contact model.ExternalTaskContact, bat
 	statusValidation.SetInput("每日必填", "请从下拉列表选择任务状态")
 	statusValidation.SetError(excelize.DataValidationErrorStyleStop, "状态不合法", "任务状态必须从下拉列表选择")
 	_ = f.AddDataValidation(sheet, statusValidation)
-	noteValidation := excelize.NewDataValidation(false)
-	noteValidation.Type = "custom"
-	noteValidation.Formula1 = "LEN(TRIM(J2))>0"
-	noteValidation.SetSqref(fmt.Sprintf("J2:J%d", lastRow))
-	noteValidation.SetInput("每日必填", "请填写当天的具体进展；无变化时请填写“无变化”及原因")
-	noteValidation.SetError(excelize.DataValidationErrorStyleStop, "进展说明不能为空", "今日进展说明每日必须填写")
-	_ = f.AddDataValidation(sheet, noteValidation)
 	instructionSheet := "填写说明"
 	_, _ = f.NewSheet(instructionSheet)
-	instructions := [][]string{{"每日必填项", "填写要求"}, {"今日进度(0-100)", "只填写0到100的整数"}, {"任务状态", "只能从下拉框选择：未开始、进行中、已完成、已暂停、已取消、已延期"}, {"今日进展说明", "必须填写当天具体进展；无变化时填写“无变化”并说明原因"}, {"时间变更申请", "如需改期，同时填写申请开始日期/申请结束日期和时间调整原因，由甲方对口人审核"}}
+	instructions := [][]string{{"填写项目", "填写要求"}, {"今日进度(0-100)", "每日必填，只填写0到100的整数"}, {"任务状态", "每日必填，只能从下拉框选择：未开始、进行中、已完成、已暂停、已取消、已延期"}, {"今日进展说明", "有实际进展时填写；没有进展可以留空"}, {"时间变更申请", "如需改期，同时填写申请开始日期/申请结束日期和时间调整原因，由甲方对口人审核"}}
 	for rowIndex, row := range instructions {
 		for columnIndex, value := range row {
 			cellName, _ := excelize.CoordinatesToCellName(columnIndex+1, rowIndex+1)
@@ -206,7 +199,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 			progress, progressErr := strconv.Atoi(strings.TrimSpace(cell(row, 7)))
 			status := statusCode[strings.TrimSpace(cell(row, 8))]
 			note := strings.TrimSpace(cell(row, 9))
-			if progressErr != nil || progress < 0 || progress > 100 || status == "" || note == "" {
+			if progressErr != nil || progress < 0 || progress > 100 || status == "" {
 				failed++
 				continue
 			}
