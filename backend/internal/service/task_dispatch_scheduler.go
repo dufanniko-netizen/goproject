@@ -1,25 +1,17 @@
 package service
 
 import (
-	"bytes"
-	"crypto/tls"
-	"encoding/base64"
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"mime"
-	"mime/multipart"
-	"mime/quotedprintable"
-	"net/mail"
-	"net/textproto"
+	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap"
-	imapid "github.com/emersion/go-imap-id"
-	"github.com/emersion/go-imap/client"
 	"gorm.io/gorm"
 
 	"project-management/internal/config"
@@ -73,134 +65,138 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 	if cfg.IMAPHost == "" || cfg.IMAPPort <= 0 || cfg.Username == "" || cfg.Password == "" {
 		return fmt.Errorf("IMAP配置不完整")
 	}
-	address := cfg.IMAPHost + ":" + strconv.Itoa(cfg.IMAPPort)
-	imapClient, err := client.DialTLS(address, &tls.Config{ServerName: cfg.IMAPHost, MinVersion: tls.VersionTLS12})
+
+	// 网易126邮箱会对第三方客户端执行额外的客户端身份检查。服务器上的
+	// Python imaplib 已验证能够完成 LOGIN、ID 和 SELECT INBOX，因此由它只
+	// 负责下载 xlsx 附件；工作簿校验、权限判断和数据库更新仍由 Go 完成。
+	outputDir, err := os.MkdirTemp("", "goproject-imap-")
 	if err != nil {
 		return err
 	}
-	defer imapClient.Logout()
-	if err := imapClient.Login(cfg.Username, cfg.Password); err != nil {
-		return fmt.Errorf("IMAP认证失败: %w", err)
-	}
-	// 网易126/163邮箱要求第三方客户端在选择邮箱前通过RFC 2971 ID命令声明身份，
-	// 否则即使登录成功也会以 Unsafe Login 拒绝 SELECT/EXAMINE INBOX。
-	if _, err := imapid.NewClient(imapClient).ID(imapid.ID{
-		imapid.FieldName:    "GoProject",
-		imapid.FieldVersion: "1.0",
-	}); err != nil {
-		return fmt.Errorf("发送IMAP客户端身份失败: %w", err)
-	}
-	if _, err := imapClient.Select("INBOX", true); err != nil {
-		return err
-	}
-	// 不只扫描未读邮件：网页邮箱或手机客户端可能在系统轮询前将回复标记为已读。
-	// ImportWorkbook 会使用 Message-ID、UID、附件序号和批次状态保证重复扫描幂等。
-	criteria := imap.NewSearchCriteria()
-	criteria.Since = time.Now().AddDate(0, 0, -14)
-	uids, err := imapClient.UidSearch(criteria)
+	defer os.RemoveAll(outputDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "python3", "-c", neteaseIMAPCollectorScript)
+	command.Env = append(os.Environ(),
+		"GOPROJECT_IMAP_HOST="+cfg.IMAPHost,
+		fmt.Sprintf("GOPROJECT_IMAP_PORT=%d", cfg.IMAPPort),
+		"GOPROJECT_IMAP_USERNAME="+cfg.Username,
+		"GOPROJECT_IMAP_PASSWORD="+cfg.Password,
+		"GOPROJECT_IMAP_OUTPUT="+outputDir,
+	)
+	stdout, err := command.Output()
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return fmt.Errorf("IMAP收信超时: %w", ctx.Err())
+		}
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("IMAP收信失败: %s", strings.TrimSpace(string(exitError.Stderr)))
+		}
+		return fmt.Errorf("启动Python IMAP收信器失败: %w", err)
 	}
-	if len(uids) == 0 {
-		return nil
+
+	type collectedAttachment struct {
+		Path      string `json:"path"`
+		MessageID string `json:"message_id"`
+		UID       string `json:"uid"`
+		Index     int    `json:"index"`
 	}
-	sequenceSet := new(imap.SeqSet)
-	sequenceSet.AddNum(uids...)
-	section := &imap.BodySectionName{Peek: true}
-	messages := make(chan *imap.Message, len(uids))
-	fetchDone := make(chan error, 1)
-	go func() {
-		fetchDone <- imapClient.UidFetch(sequenceSet, []imap.FetchItem{imap.FetchUid, section.FetchItem()}, messages)
-	}()
-	for message := range messages {
-		body := message.GetBody(section)
-		if body == nil {
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+	for scanner.Scan() {
+		var attachment collectedAttachment
+		if err := json.Unmarshal(scanner.Bytes(), &attachment); err != nil {
+			log.Printf("忽略无效的IMAP收信器输出: %v", err)
 			continue
 		}
-		raw, err := io.ReadAll(body)
+		cleanPath := filepath.Clean(attachment.Path)
+		cleanOutputDir := filepath.Clean(outputDir) + string(os.PathSeparator)
+		if !strings.HasPrefix(cleanPath, cleanOutputDir) {
+			log.Printf("忽略IMAP收信器返回的非法附件路径: %s", cleanPath)
+			continue
+		}
+		workbook, err := os.ReadFile(cleanPath)
 		if err != nil {
-			log.Printf("读取回邮失败(uid=%d): %v", message.Uid, err)
+			log.Printf("读取回邮附件失败(uid=%s): %v", attachment.UID, err)
 			continue
 		}
-		attachments, messageID, err := xlsxAttachments(raw)
-		if err != nil || len(attachments) == 0 {
+		source := fmt.Sprintf("imap:%s:%s:%d", attachment.MessageID, attachment.UID, attachment.Index)
+		batch, err := ImportWorkbook(db, workbook, source)
+		if err != nil {
+			log.Printf("回邮附件导入失败(uid=%s): %v", attachment.UID, err)
 			continue
 		}
-		processed := false
-		for index, attachment := range attachments {
-			source := fmt.Sprintf("imap:%s:%d:%d", messageID, message.Uid, index)
-			if _, err := ImportWorkbook(db, attachment, source); err != nil {
-				log.Printf("回邮附件导入失败(uid=%d): %v", message.Uid, err)
-				continue
-			}
-			processed = true
-		}
-		if processed {
-			messageSet := new(imap.SeqSet)
-			messageSet.AddNum(message.Uid)
-			if err := imapClient.UidStore(messageSet, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil); err != nil {
-				log.Printf("邮件标记已读失败(uid=%d): %v", message.Uid, err)
-			}
-		}
+		log.Printf("回邮附件导入成功(uid=%s, batch_id=%d, 成功=%d, 失败=%d)", attachment.UID, batch.ID, batch.SuccessCount, batch.FailureCount)
 	}
-	return <-fetchDone
+	return scanner.Err()
 }
 
-func xlsxAttachments(raw []byte) ([][]byte, string, error) {
-	message, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return nil, "", err
-	}
-	messageID := strings.Trim(message.Header.Get("Message-ID"), "<>")
-	attachments := make([][]byte, 0)
-	if err := collectXLSX(textproto.MIMEHeader(message.Header), message.Body, &attachments); err != nil {
-		return nil, messageID, err
-	}
-	return attachments, messageID, nil
-}
+const neteaseIMAPCollectorScript = `
+import datetime
+import email
+import imaplib
+import json
+import os
+import sys
 
-func collectXLSX(header textproto.MIMEHeader, body io.Reader, output *[][]byte) error {
-	mediaType, params, err := mime.ParseMediaType(header.Get("Content-Type"))
-	if err != nil {
-		mediaType = header.Get("Content-Type")
-	}
-	if strings.HasPrefix(mediaType, "multipart/") {
-		reader := multipart.NewReader(body, params["boundary"])
-		for {
-			part, err := reader.NextPart()
-			if err == io.EOF {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if err := collectXLSX(part.Header, part, output); err != nil {
-				return err
-			}
-		}
-	}
-	_, disposition, _ := mime.ParseMediaType(header.Get("Content-Disposition"))
-	filename := disposition["filename"]
-	if filename == "" {
-		filename = params["name"]
-	}
-	if !strings.EqualFold(filepath.Ext(filename), ".xlsx") {
-		return nil
-	}
-	var decoded io.Reader = body
-	switch strings.ToLower(strings.TrimSpace(header.Get("Content-Transfer-Encoding"))) {
-	case "base64":
-		decoded = base64.NewDecoder(base64.StdEncoding, body)
-	case "quoted-printable":
-		decoded = quotedprintable.NewReader(body)
-	}
-	data, err := io.ReadAll(io.LimitReader(decoded, 20*1024*1024+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > 20*1024*1024 {
-		return fmt.Errorf("附件超过20MB")
-	}
-	*output = append(*output, data)
-	return nil
-}
+imaplib.Commands["ID"] = ("AUTH",)
+host = os.environ["GOPROJECT_IMAP_HOST"]
+port = int(os.environ["GOPROJECT_IMAP_PORT"])
+username = os.environ["GOPROJECT_IMAP_USERNAME"]
+password = os.environ["GOPROJECT_IMAP_PASSWORD"]
+output_dir = os.environ["GOPROJECT_IMAP_OUTPUT"]
+
+client = imaplib.IMAP4_SSL(host, port)
+try:
+    client.login(username, password)
+    status, _ = client._simple_command("ID", '("name" "GoProject" "version" "1.0" "vendor" "GoProject")')
+    if status != "OK":
+        raise RuntimeError("126邮箱拒绝IMAP客户端身份")
+    status, detail = client.select("INBOX", readonly=True)
+    if status != "OK":
+        raise RuntimeError("无法选择收件箱: %r" % (detail,))
+    since = (datetime.datetime.utcnow() - datetime.timedelta(days=14)).strftime("%d-%b-%Y")
+    status, data = client.search(None, "SINCE", since)
+    if status != "OK":
+        raise RuntimeError("搜索收件箱失败: %r" % (data,))
+    message_numbers = data[0].split()[-500:]
+    for number in message_numbers:
+        status, fetched = client.fetch(number, "(UID RFC822)")
+        if status != "OK":
+            continue
+        raw = next((item[1] for item in fetched if isinstance(item, tuple) and len(item) > 1), None)
+        if not raw:
+            continue
+        uid = number.decode("ascii", "ignore")
+        for item in fetched:
+            if isinstance(item, tuple) and item and isinstance(item[0], bytes):
+                marker = item[0].decode("ascii", "ignore")
+                if "UID " in marker:
+                    uid = marker.split("UID ", 1)[1].split()[0].rstrip(")")
+                    break
+        message = email.message_from_bytes(raw)
+        message_id = (message.get("Message-ID") or "").strip("<>")
+        attachment_index = 0
+        for part in message.walk():
+            filename = part.get_filename()
+            if not filename or not filename.lower().endswith(".xlsx"):
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload or len(payload) > 20 * 1024 * 1024:
+                continue
+            path = os.path.join(output_dir, "%s_%d.xlsx" % (uid, attachment_index))
+            with open(path, "wb") as handle:
+                handle.write(payload)
+            print(json.dumps({
+                "path": path,
+                "message_id": message_id,
+                "uid": uid,
+                "index": attachment_index,
+            }, ensure_ascii=True))
+            attachment_index += 1
+finally:
+    try:
+        client.logout()
+    except Exception:
+        pass
+`
