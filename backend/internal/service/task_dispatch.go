@@ -98,13 +98,13 @@ func BuildWorkbook(project model.Project, contact model.ExternalTaskContact, bat
 	defer f.Close()
 	const sheet = "任务反馈"
 	f.SetSheetName("Sheet1", sheet)
-	headers := []string{"批次号", "任务ID", "项目", "乙方负责人", "任务名称", "原开始日期", "原结束日期", "今日进度(0-100，必填)", "任务状态（必填）", "今日进展说明（有进展时填写）", "申请开始日期", "申请结束日期", "时间调整原因"}
+	headers := []string{"批次号", "任务ID", "项目", "乙方负责人", "任务名称", "原开始日期", "原结束日期", "今日进度(有工作时必填)", "任务状态（有工作时必填）", "今日进展说明（有工作时必填）", "申请开始日期", "申请结束日期", "时间调整原因"}
 	for i, header := range headers {
 		name, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet, name, header)
 	}
 	for row, task := range tasks {
-		values := []any{batch.Token, task.ID, project.Name, contact.Name, task.Title, dateValue(task.StartDate), dateValue(task.EndDate), task.Progress, statusText[task.Status], "", "", "", ""}
+		values := []any{batch.Token, task.ID, project.Name, contact.Name, task.Title, dateValue(task.StartDate), dateValue(task.EndDate), "", "", "", "", "", ""}
 		for i, value := range values {
 			name, _ := excelize.CoordinatesToCellName(i+1, row+2)
 			f.SetCellValue(sheet, name, value)
@@ -115,23 +115,23 @@ func BuildWorkbook(project model.Project, contact model.ExternalTaskContact, bat
 	f.SetColWidth(sheet, "C", "G", 20)
 	f.SetColWidth(sheet, "H", "M", 18)
 	requiredStyle, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"FFF2CC"}, Pattern: 1}, Font: &excelize.Font{Bold: true, Color: "9C5700"}})
-	_ = f.SetCellStyle(sheet, "H1", "I1", requiredStyle)
+	_ = f.SetCellStyle(sheet, "H1", "J1", requiredStyle)
 	lastRow := len(tasks) + 1
-	progressValidation := excelize.NewDataValidation(false)
+	progressValidation := excelize.NewDataValidation(true)
 	progressValidation.SetSqref(fmt.Sprintf("H2:H%d", lastRow))
 	_ = progressValidation.SetRange(0, 100, excelize.DataValidationTypeWhole, excelize.DataValidationOperatorBetween)
-	progressValidation.SetInput("每日必填", "请输入0到100之间的整数")
+	progressValidation.SetInput("有工作时必填", "当天有工作时请输入0到100之间的整数；没有工作时三列全部留空")
 	progressValidation.SetError(excelize.DataValidationErrorStyleStop, "进度格式错误", "今日进度只能填写0到100之间的整数")
 	_ = f.AddDataValidation(sheet, progressValidation)
-	statusValidation := excelize.NewDataValidation(false)
+	statusValidation := excelize.NewDataValidation(true)
 	statusValidation.SetSqref(fmt.Sprintf("I2:I%d", lastRow))
 	_ = statusValidation.SetDropList([]string{"未开始", "进行中", "已完成", "已暂停", "已取消", "已延期"})
-	statusValidation.SetInput("每日必填", "请从下拉列表选择任务状态")
+	statusValidation.SetInput("有工作时必填", "当天有工作时请从下拉列表选择；没有工作时三列全部留空")
 	statusValidation.SetError(excelize.DataValidationErrorStyleStop, "状态不合法", "任务状态必须从下拉列表选择")
 	_ = f.AddDataValidation(sheet, statusValidation)
 	instructionSheet := "填写说明"
 	_, _ = f.NewSheet(instructionSheet)
-	instructions := [][]string{{"填写项目", "填写要求"}, {"今日进度(0-100)", "每日必填，只填写0到100的整数"}, {"任务状态", "每日必填，只能从下拉框选择：未开始、进行中、已完成、已暂停、已取消、已延期"}, {"今日进展说明", "有实际进展时填写；没有进展可以留空"}, {"时间变更申请", "如需改期，同时填写申请开始日期/申请结束日期和时间调整原因，由甲方对口人审核"}}
+	instructions := [][]string{{"填写项目", "填写要求"}, {"总体规则", "当天任务有工作：今日进度、任务状态、今日进展说明三列必须全部填写；当天没有工作：三列全部留空"}, {"今日进度", "有工作时填写，只允许0到100的整数"}, {"任务状态", "有工作时填写，只能从下拉框选择：未开始、进行中、已完成、已暂停、已取消、已延期"}, {"今日进展说明", "有工作时必须填写当天完成的具体工作，不能只写无意义内容"}, {"时间变更申请", "如需改期，同时填写申请开始日期/申请结束日期和时间调整原因，由甲方对口人审核"}}
 	for rowIndex, row := range instructions {
 		for columnIndex, value := range row {
 			cellName, _ := excelize.CoordinatesToCellName(columnIndex+1, rowIndex+1)
@@ -196,30 +196,37 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 				failed++
 				continue
 			}
-			progress, progressErr := strconv.Atoi(strings.TrimSpace(cell(row, 7)))
-			status := statusCode[strings.TrimSpace(cell(row, 8))]
+			progressText := strings.TrimSpace(cell(row, 7))
+			statusTextValue := strings.TrimSpace(cell(row, 8))
 			note := strings.TrimSpace(cell(row, 9))
-			if progressErr != nil || progress < 0 || progress > 100 || status == "" {
-				failed++
+			hasWorkUpdate := progressText != "" || statusTextValue != "" || note != ""
+			requestedStart, requestedEnd := parseDate(cell(row, 10)), parseDate(cell(row, 11))
+			hasDateRequest := datesChanged(task, requestedStart, requestedEnd)
+			if !hasWorkUpdate && !hasDateRequest {
 				continue
 			}
-			task.Progress = progress
-			oldStatus := task.Status
-			task.Status = status
-			updateCompletionTime(&task, oldStatus)
-			if note != "" {
+			if hasWorkUpdate {
+				progress, progressErr := strconv.Atoi(progressText)
+				status := statusCode[statusTextValue]
+				if progressText == "" || statusTextValue == "" || note == "" || progressErr != nil || progress < 0 || progress > 100 || status == "" {
+					failed++
+					continue
+				}
+				task.Progress = progress
+				oldStatus := task.Status
+				task.Status = status
+				updateCompletionTime(&task, oldStatus)
 				task.Description = note
 				task.LatestUpdate = note
 				now := time.Now()
 				task.LatestUpdateAt = &now
 				progressUpdateTaskIDs = append(progressUpdateTaskIDs, task.ID)
+				if err := tx.Save(&task).Error; err != nil {
+					failed++
+					continue
+				}
 			}
-			if err := tx.Save(&task).Error; err != nil {
-				failed++
-				continue
-			}
-			requestedStart, requestedEnd := parseDate(cell(row, 10)), parseDate(cell(row, 11))
-			if datesChanged(task, requestedStart, requestedEnd) {
+			if hasDateRequest {
 				if task.CounterpartID == nil || strings.TrimSpace(cell(row, 12)) == "" {
 					failed++
 					continue
