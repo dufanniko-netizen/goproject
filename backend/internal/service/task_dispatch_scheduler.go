@@ -85,7 +85,9 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 	if _, err := client.Select("INBOX", nil).Wait(); err != nil {
 		return err
 	}
-	search, err := client.UIDSearch(&imap.SearchCriteria{NotFlag: []imap.Flag{imap.FlagSeen}, Since: time.Now().AddDate(0, 0, -14)}, nil).Wait()
+	// 不只扫描未读邮件：网页邮箱或手机客户端可能在系统轮询前将回复标记为已读。
+	// ImportWorkbook 会使用 Message-ID、UID、附件序号和批次状态保证重复扫描幂等。
+	search, err := client.UIDSearch(&imap.SearchCriteria{Since: time.Now().AddDate(0, 0, -14)}, nil).Wait()
 	if err != nil {
 		return err
 	}
