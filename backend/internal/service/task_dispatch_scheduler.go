@@ -75,7 +75,7 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 	}
 	defer os.RemoveAll(outputDir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "python3", "-c", neteaseIMAPCollectorScript)
 	command.Env = append(os.Environ(),
@@ -162,13 +162,14 @@ try:
     if status != "OK":
         raise RuntimeError("无法选择收件箱: %r" % (detail,))
     # 网易邮箱的 SINCE 检索在部分账号上会返回空结果；ALL 已在同一服务器
-    # 和账号上验证能稳定返回邮件，因此读取最近500封并依靠批次号保证幂等。
+    # 和账号上验证能稳定返回邮件。只读取最近50封并从最新邮件开始处理，
+    # 避免大邮箱逐封FETCH时在抵达最新回复之前超时。
     status, data = client.search(None, "ALL")
     if status != "OK":
         raise RuntimeError("搜索收件箱失败: %r" % (data,))
-    message_numbers = data[0].split()[-500:]
+    message_numbers = data[0].split()[-50:]
     files_found = 0
-    for number in message_numbers:
+    for number in reversed(message_numbers):
         status, fetched = client.fetch(number, "(UID RFC822)")
         if status != "OK":
             continue
