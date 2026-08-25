@@ -152,6 +152,18 @@ import imaplib
 import json
 import os
 import sys
+from email.header import decode_header
+
+def decode_mime_header(value):
+    if not value:
+        return ""
+    result = ""
+    for part, charset in decode_header(value):
+        if isinstance(part, bytes):
+            result += part.decode(charset or "utf-8", "replace")
+        else:
+            result += part
+    return result
 
 imaplib.Commands["ID"] = ("AUTH",)
 host = os.environ["GOPROJECT_IMAP_HOST"]
@@ -195,7 +207,7 @@ try:
         message_id = (message.get("Message-ID") or "").strip("<>")
         attachment_index = 0
         for part in message.walk():
-            filename = part.get_filename()
+            filename = decode_mime_header(part.get_filename())
             if not filename or not filename.lower().endswith(".xlsx"):
                 continue
             payload = part.get_payload(decode=True)
