@@ -151,6 +151,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 		}
 	}
 	createdRequestIDs := make([]uint, 0)
+	progressUpdateTaskIDs := make([]uint, 0)
 	err = db.Transaction(func(tx *gorm.DB) error {
 		success, failed := 0, 0
 		for _, row := range rows[1:] {
@@ -182,6 +183,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 				task.LatestUpdate = note
 				now := time.Now()
 				task.LatestUpdateAt = &now
+				progressUpdateTaskIDs = append(progressUpdateTaskIDs, task.ID)
 			}
 			if err := tx.Save(&task).Error; err != nil {
 				failed++
@@ -208,9 +210,33 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 		return tx.Save(&batch).Error
 	})
 	if err == nil {
+		sendProgressUpdateReminders(db, progressUpdateTaskIDs)
 		sendTimeChangeReminders(db, createdRequestIDs)
 	}
 	return &batch, err
+}
+
+func sendProgressUpdateReminders(db *gorm.DB, taskIDs []uint) {
+	for _, taskID := range taskIDs {
+		var task model.Task
+		if err := db.Preload("Project").Preload("Counterpart").First(&task, taskID).Error; err != nil {
+			log.Printf("读取任务进展提醒失败(task_id=%d): %v", taskID, err)
+			continue
+		}
+		if task.Counterpart == nil || strings.TrimSpace(task.Counterpart.Email) == "" {
+			log.Printf("任务对口人未配置邮箱，无法发送进展提醒(task_id=%d)", taskID)
+			continue
+		}
+		name := strings.TrimSpace(task.Counterpart.Nickname)
+		if name == "" {
+			name = task.Counterpart.Username
+		}
+		body := fmt.Sprintf("<p>%s，您好：</p><p>您对口的任务 <strong>%s</strong> 收到新的今日进展反馈。</p><p>项目：%s</p><p>状态：%s</p><p>进度：%d%%</p><p>今日进展说明：%s</p><p style=\"color:#888\">请登录项目管理系统查看任务详情。此邮件由系统自动发送，请勿直接回复。</p>",
+			html.EscapeString(name), html.EscapeString(task.Title), html.EscapeString(task.Project.Name), html.EscapeString(statusText[task.Status]), task.Progress, html.EscapeString(task.LatestUpdate))
+		if err := mailer.SendHTML(task.Counterpart.Email, "[任务进展] "+task.Project.Name+" - "+task.Title, body); err != nil {
+			log.Printf("发送任务进展提醒失败(task_id=%d): %v", taskID, err)
+		}
+	}
 }
 
 func sendTimeChangeReminders(db *gorm.DB, requestIDs []uint) {
