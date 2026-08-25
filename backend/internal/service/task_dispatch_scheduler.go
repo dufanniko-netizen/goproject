@@ -97,16 +97,23 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 	}
 
 	type collectedAttachment struct {
+		Type      string `json:"type"`
 		Path      string `json:"path"`
 		MessageID string `json:"message_id"`
 		UID       string `json:"uid"`
 		Index     int    `json:"index"`
+		Messages  int    `json:"messages"`
+		Files     int    `json:"files"`
 	}
 	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
 	for scanner.Scan() {
 		var attachment collectedAttachment
 		if err := json.Unmarshal(scanner.Bytes(), &attachment); err != nil {
 			log.Printf("忽略无效的IMAP收信器输出: %v", err)
+			continue
+		}
+		if attachment.Type == "summary" {
+			log.Printf("任务反馈邮箱扫描完成: 检查邮件=%d, 发现xlsx附件=%d", attachment.Messages, attachment.Files)
 			continue
 		}
 		cleanPath := filepath.Clean(attachment.Path)
@@ -132,7 +139,6 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 }
 
 const neteaseIMAPCollectorScript = `
-import datetime
 import email
 import imaplib
 import json
@@ -155,11 +161,13 @@ try:
     status, detail = client.select("INBOX", readonly=True)
     if status != "OK":
         raise RuntimeError("无法选择收件箱: %r" % (detail,))
-    since = (datetime.datetime.utcnow() - datetime.timedelta(days=14)).strftime("%d-%b-%Y")
-    status, data = client.search(None, "SINCE", since)
+    # 网易邮箱的 SINCE 检索在部分账号上会返回空结果；ALL 已在同一服务器
+    # 和账号上验证能稳定返回邮件，因此读取最近500封并依靠批次号保证幂等。
+    status, data = client.search(None, "ALL")
     if status != "OK":
         raise RuntimeError("搜索收件箱失败: %r" % (data,))
     message_numbers = data[0].split()[-500:]
+    files_found = 0
     for number in message_numbers:
         status, fetched = client.fetch(number, "(UID RFC822)")
         if status != "OK":
@@ -188,12 +196,19 @@ try:
             with open(path, "wb") as handle:
                 handle.write(payload)
             print(json.dumps({
+                "type": "attachment",
                 "path": path,
                 "message_id": message_id,
                 "uid": uid,
                 "index": attachment_index,
             }, ensure_ascii=True))
             attachment_index += 1
+            files_found += 1
+    print(json.dumps({
+        "type": "summary",
+        "messages": len(message_numbers),
+        "files": files_found,
+    }, ensure_ascii=True))
 finally:
     try:
         client.logout()
