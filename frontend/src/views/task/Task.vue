@@ -193,7 +193,10 @@
                   {{ record.requirement?.title || '-' }}
                 </template>
                 <template v-else-if="column.key === 'assignee'">
-                  {{ record.node_type === 'group' ? '-' : (record.assignee ? `${record.assignee.username}${record.assignee.nickname ? `(${record.assignee.nickname})` : ''}` : '-') }}
+                  {{ record.node_type === 'group' ? '-' : getAssigneeName(record) }}
+                </template>
+                <template v-else-if="column.key === 'counterpart'">
+                  {{ record.node_type === 'group' ? '-' : getCounterpartName(record) }}
                 </template>
                 <template v-else-if="column.key === 'progress'">
                   <span v-if="record.node_type === 'group'">-</span>
@@ -202,9 +205,8 @@
                 <template v-else-if="column.key === 'hours'">
                   <span v-if="record.node_type === 'group'">-</span>
                   <div v-else>
-                    <div v-if="record.estimated_hours">预估: {{ record.estimated_hours.toFixed(2) }}h</div>
-                    <div v-if="record.actual_hours">实际: {{ record.actual_hours.toFixed(2) }}h</div>
-                    <span v-if="!record.estimated_hours && !record.actual_hours">-</span>
+                    <div>计划: {{ record.planned_days || 0 }}天 / {{ record.estimated_hours || 0 }}h</div>
+                    <div>实际: {{ record.actual_days || 0 }}天 / {{ record.actual_hours || 0 }}h</div>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'dates'">
@@ -212,7 +214,6 @@
                   <a-tooltip v-else :title="getTaskDateTooltip(record)">
                     <span
                       class="task-date-range"
-                      :class="{ 'task-date-overdue': record.due_date && isOverdue(record.due_date, record.status) }"
                     >
                       {{ getTaskDateRange(record) }}
                     </span>
@@ -389,22 +390,27 @@
             <a-select-option value="urgent">紧急</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject" label="负责人" name="assignee_id">
-          <a-select
-            v-model:value="formData.assignee_id"
-            placeholder="选择负责人（可选）"
+        <a-form-item v-if="!isAutomationFormProject" label="负责人（乙方）" name="assignee_name">
+          <a-auto-complete
+            v-model:value="formData.assignee_name"
+            :options="userNameOptions"
+            placeholder="输入姓名或选择系统用户"
             allow-clear
-            show-search
-            :filter-option="filterUserOption"
-          >
-            <a-select-option
-              v-for="user in users"
-              :key="user.id"
-              :value="user.id"
-            >
-              {{ user.username }}{{ user.nickname ? `(${user.nickname})` : '' }}
-            </a-select-option>
-          </a-select>
+            @change="handleAssigneeNameChange"
+            @select="handleAssigneeSelect"
+          />
+          <div class="form-help">可直接填写乙方姓名，也可选择系统用户</div>
+        </a-form-item>
+        <a-form-item v-if="!isAutomationFormProject" label="对口人（甲方）" name="counterpart_name">
+          <a-auto-complete
+            v-model:value="formData.counterpart_name"
+            :options="userNameOptions"
+            placeholder="输入姓名或选择系统用户"
+            allow-clear
+            @change="handleCounterpartNameChange"
+            @select="handleCounterpartSelect"
+          />
+          <div class="form-help">可直接填写甲方对口人，也可选择系统用户</div>
         </a-form-item>
         <a-form-item label="开始日期" name="start_date">
           <a-date-picker
@@ -422,14 +428,6 @@
             format="YYYY-MM-DD"
           />
         </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject" label="截止日期" name="due_date">
-          <a-date-picker
-            v-model:value="formData.due_date"
-            placeholder="选择截止日期"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
-        </a-form-item>
         <a-form-item v-if="!isAutomationFormProject" label="进度" name="progress">
           <a-slider
             v-model:value="formData.progress"
@@ -439,33 +437,13 @@
           />
           <span style="margin-left: 8px">{{ formData.progress }}%</span>
         </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject" label="预估工时" name="estimated_hours">
-          <a-input-number
-            v-model:value="formData.estimated_hours"
-            placeholder="预估工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
+        <a-form-item v-if="!isAutomationFormProject" label="计划天数 / 预估工时">
+          <a-input :value="`${formPlannedDays} 天 / ${formEstimatedHours} 小时`" disabled />
+          <div class="form-help">按开始、结束日期（含首尾）自动计算，每天 8 小时</div>
         </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject" label="实际工时" name="actual_hours">
-          <a-input-number
-            v-model:value="formData.actual_hours"
-            placeholder="实际工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-          <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配</span>
-        </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject && formData.actual_hours" label="工作日期" name="work_date">
-          <a-date-picker
-            v-model:value="formData.work_date"
-            placeholder="选择工作日期（可选）"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
-          <span style="margin-left: 8px; color: #999">不填则使用任务开始日期或今天</span>
+        <a-form-item v-if="!isAutomationFormProject" label="实际天数 / 实际工时">
+          <a-input :value="`${formActualDays} 天 / ${formActualHours} 小时`" disabled />
+          <div class="form-help">从开始日期到今天（含开始当天）自动计算，尚未开始为 0</div>
         </a-form-item>
         <a-form-item v-if="!isAutomationFormProject" label="附件">
           <AttachmentUpload
@@ -520,37 +498,8 @@
             :min="0"
             :max="100"
             :marks="{ 0: '0%', 50: '50%', 100: '100%' }"
-            :disabled="autoProgress"
           />
           <span style="margin-left: 8px">{{ progressFormData.progress || 0 }}%</span>
-          <span v-if="autoProgress" style="margin-left: 8px; color: #999">（根据工时自动计算）</span>
-        </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
-          <a-input-number
-            v-model:value="progressFormData.estimated_hours"
-            placeholder="预估工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-        </a-form-item>
-        <a-form-item label="实际工时" name="actual_hours">
-          <a-input-number
-            v-model:value="progressFormData.actual_hours"
-            placeholder="实际工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-          <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配并计算进度</span>
-        </a-form-item>
-        <a-form-item label="工作日期" name="work_date" v-if="progressFormData.actual_hours">
-          <a-date-picker
-            v-model:value="progressFormData.work_date"
-            placeholder="选择工作日期（默认今天）"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -615,8 +564,11 @@
               <a-descriptions-item label="项目">
                 {{ detailTask.project?.name || '-' }}
               </a-descriptions-item>
-              <a-descriptions-item label="负责人">
-                {{ detailTask.assignee ? `${detailTask.assignee.username}${detailTask.assignee.nickname ? `(${detailTask.assignee.nickname})` : ''}` : '-' }}
+              <a-descriptions-item label="负责人（乙方）">
+                {{ getAssigneeName(detailTask) }}
+              </a-descriptions-item>
+              <a-descriptions-item label="对口人（甲方）">
+                {{ getCounterpartName(detailTask) }}
               </a-descriptions-item>
               <a-descriptions-item label="开始日期">
                 {{ detailTask.start_date || '-' }}
@@ -624,10 +576,11 @@
               <a-descriptions-item label="结束日期">
                 {{ detailTask.end_date || '-' }}
               </a-descriptions-item>
-              <a-descriptions-item label="截止日期">
-                <span :style="{ color: isOverdue(detailTask.due_date, detailTask.status) ? 'red' : '' }">
-                  {{ detailTask.due_date || '-' }}
-                </span>
+              <a-descriptions-item v-if="detailTask.project?.project_type !== 'automation'" label="计划天数 / 预估工时">
+                {{ detailTask.planned_days || 0 }} 天 / {{ detailTask.estimated_hours || 0 }} 小时
+              </a-descriptions-item>
+              <a-descriptions-item v-if="detailTask.project?.project_type !== 'automation'" label="实际天数 / 实际工时">
+                {{ detailTask.actual_days || 0 }} 天 / {{ detailTask.actual_hours || 0 }} 小时
               </a-descriptions-item>
               <a-descriptions-item label="创建人">
                 {{ detailTask.creator ? `${detailTask.creator.username}${detailTask.creator.nickname ? `(${detailTask.creator.nickname})` : ''}` : '-' }}
@@ -865,7 +818,8 @@ const baseColumns = [
   { title: '需求', key: 'requirement', width: 150 },
   { title: '状态', key: 'status', width: 90 },
   { title: '优先级', key: 'priority', width: 100 },
-  { title: '负责人', key: 'assignee', width: 130, ellipsis: true },
+  { title: '负责人（乙方）', key: 'assignee', width: 140, ellipsis: true },
+  { title: '对口人（甲方）', key: 'counterpart', width: 140, ellipsis: true },
   { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
   { title: '日期', key: 'dates', width: 210 },
@@ -891,7 +845,7 @@ const automationColumns = [
 const selectedSearchProject = computed(() => projects.value.find(project => project.id === searchForm.project_id))
 const isAutomationTaskView = computed(() => selectedSearchProject.value?.project_type === 'automation')
 
-const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'progress', 'dates']
+const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'counterpart', 'progress', 'dates']
 const savedVisibleColumns = localStorage.getItem('task_visible_columns')
 const restoreVisibleColumns = () => {
   try {
@@ -959,15 +913,14 @@ const getLevelTitle = (task: Task, level: number) => {
 
 const getTaskDateRange = (task: Task) => {
   const start = task.start_date ? formatDate(task.start_date) : '-'
-  const finishDate = task.due_date || task.end_date
+  const finishDate = task.end_date
   const finish = finishDate ? formatDate(finishDate) : '-'
   return `${start} → ${finish}`
 }
 
 const getTaskDateTooltip = (task: Task) => [
   task.start_date ? `开始：${formatDate(task.start_date)}` : null,
-  task.end_date ? `结束：${formatDate(task.end_date)}` : null,
-  task.due_date ? `截止：${formatDate(task.due_date)}` : null
+  task.end_date ? `结束：${formatDate(task.end_date)}` : null
 ].filter(Boolean).join('；') || '未设置日期'
 
 const modalVisible = ref(false)
@@ -983,6 +936,9 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   parent_id: undefined,
   requirement_id: undefined,
   assignee_id: undefined,
+  assignee_name: '',
+  counterpart_id: undefined,
+  counterpart_name: '',
   start_date: undefined,
   end_date: undefined,
   due_date: undefined,
@@ -1006,6 +962,44 @@ const isAutomationFormProject = computed(() =>
   projects.value.find(project => project.id === formData.project_id)?.project_type === 'automation'
 )
 
+const formatUserName = (user: User) => `${user.username}${user.nickname ? `(${user.nickname})` : ''}`
+const userNameOptions = computed(() => users.value.map(user => ({
+  value: formatUserName(user),
+  label: formatUserName(user),
+  userId: user.id
+})))
+
+const findUserByDisplayName = (value?: string) => users.value.find(user => formatUserName(user) === value)
+const handleAssigneeNameChange = (value: string) => {
+  formData.assignee_id = findUserByDisplayName(value)?.id
+}
+const handleAssigneeSelect = (_value: string, option: any) => {
+  formData.assignee_id = option.userId
+}
+const handleCounterpartNameChange = (value: string) => {
+  formData.counterpart_id = findUserByDisplayName(value)?.id
+}
+const handleCounterpartSelect = (_value: string, option: any) => {
+  formData.counterpart_id = option.userId
+}
+const getAssigneeName = (task: Task) => task.assignee
+  ? `${task.assignee.username}${task.assignee.nickname ? `(${task.assignee.nickname})` : ''}`
+  : task.assignee_name || '-'
+const getCounterpartName = (task: Task) => task.counterpart
+  ? `${task.counterpart.username}${task.counterpart.nickname ? `(${task.counterpart.nickname})` : ''}`
+  : task.counterpart_name || '-'
+
+const formPlannedDays = computed(() => {
+  if (!formData.start_date || !formData.end_date || formData.end_date.isBefore(formData.start_date, 'day')) return 0
+  return formData.end_date.startOf('day').diff(formData.start_date.startOf('day'), 'day') + 1
+})
+const formActualDays = computed(() => {
+  if (!formData.start_date || dayjs().startOf('day').isBefore(formData.start_date.startOf('day'))) return 0
+  return dayjs().startOf('day').diff(formData.start_date.startOf('day'), 'day') + 1
+})
+const formEstimatedHours = computed(() => formPlannedDays.value * 8)
+const formActualHours = computed(() => formActualDays.value * 8)
+
 const formTaskLevel = computed(() => {
   if (!formData.parent_id) return 1
   const parent = availableTasks.value.find(task => task.id === formData.parent_id)
@@ -1024,38 +1018,14 @@ const progressFormRef = ref()
 const progressFormData = reactive<{
   task_id: number
   progress?: number
-  estimated_hours?: number
-  actual_hours?: number
-  work_date?: Dayjs
 }>({
   task_id: 0,
-  progress: undefined,
-  estimated_hours: undefined,
-  actual_hours: undefined,
-  work_date: undefined
+  progress: undefined
 })
 
 const progressFormRules = {
-  // progress不再是必填项，因为可以通过工时自动计算
+  // 进度可单独维护，工时由日期自动计算。
 }
-
-// 自动计算进度（实际工时/预估工时 * 100）
-const autoProgress = computed(() => {
-  if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
-    const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
-    progressFormData.progress = progress
-    return true
-  }
-  return false
-})
-
-// 监听实际工时和预估工时的变化，自动计算进度
-watch([() => progressFormData.actual_hours, () => progressFormData.estimated_hours], () => {
-  if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
-    const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
-    progressFormData.progress = progress
-  }
-})
 
 // 加载任务列表
 const loadTasks = async () => {
@@ -1233,6 +1203,9 @@ const handleCreate = () => {
   }
   formData.requirement_id = undefined
   formData.assignee_id = undefined
+  formData.assignee_name = ''
+  formData.counterpart_id = undefined
+  formData.counterpart_name = ''
   formData.start_date = undefined
   formData.end_date = undefined
   formData.due_date = undefined
@@ -1280,6 +1253,9 @@ const handleEdit = async (record: Task) => {
   formData.parent_id = record.parent_id
   formData.requirement_id = record.requirement_id
   formData.assignee_id = record.assignee_id
+  formData.assignee_name = record.assignee ? formatUserName(record.assignee) : (record.assignee_name || '')
+  formData.counterpart_id = record.counterpart_id
+  formData.counterpart_name = record.counterpart ? formatUserName(record.counterpart) : (record.counterpart_name || '')
   // 解析日期，确保日期有效
   if (record.start_date) {
     const startDate = dayjs(record.start_date)
@@ -1367,14 +1343,13 @@ const handleSubmit = async () => {
       // 编辑时用 0 明确表示清除父任务；创建时不选父任务则省略该字段
       parent_id: formData.id ? (formData.parent_id || 0) : formData.parent_id,
       requirement_id: formData.requirement_id,
-      assignee_id: formData.assignee_id,
+      assignee_id: formData.id ? (formData.assignee_id || 0) : formData.assignee_id,
+      assignee_name: formData.assignee_id ? '' : (formData.assignee_name || ''),
+      counterpart_id: formData.id ? (formData.counterpart_id || 0) : formData.counterpart_id,
+      counterpart_name: formData.counterpart_id ? '' : (formData.counterpart_name || ''),
       start_date: formData.start_date && formData.start_date.isValid() ? formData.start_date.format('YYYY-MM-DD') : undefined,
       end_date: formData.end_date && formData.end_date.isValid() ? formData.end_date.format('YYYY-MM-DD') : undefined,
-      due_date: formData.due_date && formData.due_date.isValid() ? formData.due_date.format('YYYY-MM-DD') : undefined,
       progress: formData.progress,
-      estimated_hours: formData.estimated_hours,
-      actual_hours: formData.actual_hours,
-      work_date: formData.work_date && formData.work_date.isValid() ? formData.work_date.format('YYYY-MM-DD') : undefined,
       dependency_ids: formData.dependency_ids,
       task_sequence: formData.task_sequence,
       milestone1: formData.milestone1,
@@ -1467,9 +1442,6 @@ const handleActionMenu = (record: Task, key: string) => {
 const handleUpdateProgress = (record: Task) => {
   progressFormData.task_id = record.id
   progressFormData.progress = record.progress
-  progressFormData.estimated_hours = record.estimated_hours
-  progressFormData.actual_hours = record.actual_hours // 显示当前实际工时
-  progressFormData.work_date = dayjs() // 默认今天
   progressModalVisible.value = true
 }
 
@@ -1478,10 +1450,7 @@ const handleProgressSubmit = async () => {
   try {
     await progressFormRef.value.validate()
     const data: UpdateTaskProgressRequest = {
-      progress: progressFormData.progress,
-      estimated_hours: progressFormData.estimated_hours,
-      actual_hours: progressFormData.actual_hours,
-      work_date: progressFormData.work_date && progressFormData.work_date.isValid() ? progressFormData.work_date.format('YYYY-MM-DD') : undefined
+      progress: progressFormData.progress
     }
     await updateTaskProgress(progressFormData.task_id, data)
     message.success('进度更新成功')
@@ -1546,16 +1515,6 @@ const getPriorityText = (priority: string) => {
     urgent: '紧急'
   }
   return texts[priority] || priority
-}
-
-// 判断是否逾期
-const isOverdue = (dueDate: string | undefined, status: string | undefined): boolean => {
-  if (!dueDate || status === 'done' || status === 'closed' || status === 'cancel') {
-    return false
-  }
-  const due = dayjs(dueDate)
-  const now = dayjs()
-  return due.isBefore(now, 'day')
 }
 
 // 加载任务详情
@@ -1759,17 +1718,6 @@ const filterTaskOption = (input: string, option: any) => {
   if (!task) return false
   const searchText = input.toLowerCase()
   return task.title.toLowerCase().includes(searchText)
-}
-
-// 用户筛选
-const filterUserOption = (input: string, option: any) => {
-  const user = users.value.find(u => u.id === option.value)
-  if (!user) return false
-  const searchText = input.toLowerCase()
-  return (
-    user.username.toLowerCase().includes(searchText) ||
-    (user.nickname && user.nickname.toLowerCase().includes(searchText))
-  )
 }
 
 onMounted(async () => {

@@ -14,12 +14,18 @@ export interface Task {
   creator?: any
   assignee_id?: number
   assignee?: any
+  assignee_name?: string
+  counterpart_id?: number
+  counterpart?: any
+  counterpart_name?: string
   start_date?: string
   end_date?: string
   due_date?: string
   progress: number
   estimated_hours?: number
   actual_hours?: number
+  planned_days?: number
+  actual_days?: number
   dependencies?: Task[]
   parent_id?: number
   parent?: Task
@@ -53,6 +59,9 @@ export interface CreateTaskRequest {
   project_id: number
   requirement_id?: number
   assignee_id?: number
+  assignee_name?: string
+  counterpart_id?: number
+  counterpart_name?: string
   start_date?: string
   end_date?: string
   due_date?: string

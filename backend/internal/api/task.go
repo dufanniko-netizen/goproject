@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,34 @@ import (
 
 type TaskHandler struct {
 	db *gorm.DB
+}
+
+// applySmartWarehouseCalculatedHours 计算智慧仓储任务的计划/实际天数及工时。
+// 天数按自然日且包含首尾日期；尚未开始的任务实际天数为 0。
+func applySmartWarehouseCalculatedHours(task *model.Task, now time.Time) {
+	if task.Project.ProjectType != "smart_warehouse" {
+		return
+	}
+	task.DueDate = nil
+	task.PlannedDays = inclusiveDays(task.StartDate, task.EndDate)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	task.ActualDays = inclusiveDays(task.StartDate, &today)
+	estimated := float64(task.PlannedDays * 8)
+	actual := float64(task.ActualDays * 8)
+	task.EstimatedHours = &estimated
+	task.ActualHours = &actual
+}
+
+func inclusiveDays(start, end *time.Time) int {
+	if start == nil || end == nil {
+		return 0
+	}
+	startDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	if endDay.Before(startDay) {
+		return 0
+	}
+	return int(endDay.Sub(startDay).Hours()/24) + 1
 }
 
 func (h *TaskHandler) ensureProjectNotUnderReview(c *gin.Context, projectID uint) error {
@@ -32,14 +61,14 @@ func NewTaskHandler(db *gorm.DB) *TaskHandler {
 // GetTasks 获取任务列表
 func (h *TaskHandler) GetTasks(c *gin.Context) {
 	var tasks []model.Task
-	query := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies")
+	query := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies")
 
 	// 权限过滤：普通用户只能看到自己创建或参与的任务
 	query = utils.FilterTasksByUser(h.db, c, query)
 
 	// 搜索
 	if keyword := c.Query("keyword"); keyword != "" {
-		query = query.Where("title LIKE ? OR description LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+		query = query.Where("title LIKE ? OR description LIKE ? OR assignee_name LIKE ? OR counterpart_name LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
 
 	// 项目筛选
@@ -81,7 +110,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 
 	// 搜索
 	if keyword := c.Query("keyword"); keyword != "" {
-		countQuery = countQuery.Where("title LIKE ? OR description LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+		countQuery = countQuery.Where("title LIKE ? OR description LIKE ? OR assignee_name LIKE ? OR counterpart_name LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
 
 	// 项目筛选
@@ -118,6 +147,9 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 		utils.Error(c, utils.CodeError, "查询失败")
 		return
 	}
+	for i := range tasks {
+		applySmartWarehouseCalculatedHours(&tasks[i], time.Now())
+	}
 
 	utils.Success(c, gin.H{
 		"list":      tasks,
@@ -131,10 +163,11 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	var task model.Task
-	if err := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, id).Error; err != nil {
+	if err := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, id).Error; err != nil {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
+	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	// 权限检查：普通用户只能查看自己创建或参与的任务
 	if !utils.CheckTaskReadAccess(h.db, c, task.ID) {
@@ -155,6 +188,9 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		ProjectID       uint     `json:"project_id" binding:"required"`
 		RequirementID   *uint    `json:"requirement_id"`
 		AssigneeID      *uint    `json:"assignee_id"`
+		AssigneeName    string   `json:"assignee_name"`
+		CounterpartID   *uint    `json:"counterpart_id"`
+		CounterpartName string   `json:"counterpart_name"`
 		StartDate       *string  `json:"start_date"`
 		EndDate         *string  `json:"end_date"`
 		DueDate         *string  `json:"due_date"`
@@ -284,10 +320,17 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// 如果指定了负责人，验证用户是否存在
-	if req.AssigneeID != nil {
+	if req.AssigneeID != nil && *req.AssigneeID != 0 {
 		var user model.User
 		if err := h.db.First(&user, *req.AssigneeID).Error; err != nil {
 			utils.Error(c, 400, "负责人不存在")
+			return
+		}
+	}
+	if req.CounterpartID != nil && *req.CounterpartID != 0 {
+		var user model.User
+		if err := h.db.First(&user, *req.CounterpartID).Error; err != nil {
+			utils.Error(c, 400, "对口人不存在")
 			return
 		}
 	}
@@ -319,6 +362,9 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		RequirementID:   req.RequirementID,
 		CreatorID:       userID.(uint),
 		AssigneeID:      req.AssigneeID,
+		AssigneeName:    strings.TrimSpace(req.AssigneeName),
+		CounterpartID:   req.CounterpartID,
+		CounterpartName: strings.TrimSpace(req.CounterpartName),
 		StartDate:       startDate,
 		EndDate:         endDate,
 		DueDate:         dueDate,
@@ -335,6 +381,19 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		PlanProgress:    req.PlanProgress,
 		ReasonAnalysis:  req.ReasonAnalysis,
 		RequiredSupport: req.RequiredSupport,
+	}
+	if task.AssigneeID != nil && *task.AssigneeID == 0 {
+		task.AssigneeID = nil
+	}
+	if task.CounterpartID != nil && *task.CounterpartID == 0 {
+		task.CounterpartID = nil
+	}
+	if project.ProjectType == "smart_warehouse" {
+		task.DueDate = nil
+		task.Project = project
+		applySmartWarehouseCalculatedHours(&task, time.Now())
+		// 仅借助 ProjectType 计算字段，创建任务时不写回项目关联。
+		task.Project = model.Project{}
 	}
 
 	if err := h.db.Create(&task).Error; err != nil {
@@ -363,7 +422,8 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, task.ID)
+	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	// 记录创建操作
 	if userID, exists := c.Get("user_id"); exists {
@@ -406,6 +466,9 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		ProjectID       *uint    `json:"project_id"`
 		RequirementID   *uint    `json:"requirement_id"`
 		AssigneeID      *uint    `json:"assignee_id"`
+		AssigneeName    *string  `json:"assignee_name"`
+		CounterpartID   *uint    `json:"counterpart_id"`
+		CounterpartName *string  `json:"counterpart_name"`
 		StartDate       *string  `json:"start_date"`
 		EndDate         *string  `json:"end_date"`
 		DueDate         *string  `json:"due_date"`
@@ -552,6 +615,30 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			task.AssigneeID = nil
 		}
 	}
+	if req.AssigneeName != nil {
+		task.AssigneeName = strings.TrimSpace(*req.AssigneeName)
+		if task.AssigneeName != "" {
+			task.AssigneeID = nil
+		}
+	}
+	if req.CounterpartID != nil {
+		if *req.CounterpartID != 0 {
+			var user model.User
+			if err := h.db.First(&user, *req.CounterpartID).Error; err != nil {
+				utils.Error(c, 400, "对口人不存在")
+				return
+			}
+			task.CounterpartID = req.CounterpartID
+		} else {
+			task.CounterpartID = nil
+		}
+	}
+	if req.CounterpartName != nil {
+		task.CounterpartName = strings.TrimSpace(*req.CounterpartName)
+		if task.CounterpartName != "" {
+			task.CounterpartID = nil
+		}
+	}
 	if req.StartDate != nil {
 		if *req.StartDate != "" {
 			if t, err := time.Parse("2006-01-02", *req.StartDate); err == nil {
@@ -614,7 +701,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	if req.RequiredSupport != nil {
 		task.RequiredSupport = *req.RequiredSupport
 	}
-	if req.EstimatedHours != nil {
+	if req.EstimatedHours != nil && taskProject.ProjectType != "smart_warehouse" {
 		if *req.EstimatedHours < 0 {
 			utils.Error(c, 400, "预估工时不能为负数")
 			return
@@ -622,7 +709,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		task.EstimatedHours = req.EstimatedHours
 	}
 	// 如果更新了实际工时，自动创建或更新资源分配
-	if req.ActualHours != nil {
+	if req.ActualHours != nil && taskProject.ProjectType != "smart_warehouse" {
 		if *req.ActualHours < 0 {
 			utils.Error(c, 400, "实际工时不能为负数")
 			return
@@ -654,6 +741,11 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			return
 		}
 	}
+	if taskProject.ProjectType == "smart_warehouse" {
+		task.DueDate = nil
+		task.Project = taskProject
+		applySmartWarehouseCalculatedHours(&task, time.Now())
+	}
 
 	if err := h.db.Save(&task).Error; err != nil {
 		utils.Error(c, utils.CodeError, "更新失败")
@@ -661,10 +753,11 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	}
 
 	// 计算并更新实际工时（从资源分配中汇总）
-	h.calculateAndUpdateActualHours(&task)
-
-	// 根据实际工时和预估工时自动计算进度
-	h.calculateProgressFromHours(&task)
+	if taskProject.ProjectType != "smart_warehouse" {
+		h.calculateAndUpdateActualHours(&task)
+		// 根据实际工时和预估工时自动计算进度
+		h.calculateProgressFromHours(&task)
+	}
 
 	// 更新任务依赖关系
 	if req.DependencyIDs != nil {
@@ -689,7 +782,8 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, task.ID)
+	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	// 记录编辑操作和字段变更
 	userID, exists := c.Get("user_id")
@@ -802,7 +896,8 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, task.ID)
+	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	utils.Success(c, task)
 }
@@ -823,6 +918,11 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	}
 	if err := h.ensureProjectNotUnderReview(c, task.ProjectID); err != nil {
 		utils.Error(c, 409, err.Error())
+		return
+	}
+	var taskProject model.Project
+	if err := h.db.First(&taskProject, task.ProjectID).Error; err != nil {
+		utils.Error(c, 400, "项目不存在")
 		return
 	}
 
@@ -857,7 +957,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	}
 
 	// 更新预估工时
-	if req.EstimatedHours != nil {
+	if req.EstimatedHours != nil && taskProject.ProjectType != "smart_warehouse" {
 		if *req.EstimatedHours < 0 {
 			utils.Error(c, 400, "预估工时不能为负数")
 			return
@@ -866,7 +966,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	}
 
 	// 更新实际工时
-	if req.ActualHours != nil {
+	if req.ActualHours != nil && taskProject.ProjectType != "smart_warehouse" {
 		if *req.ActualHours < 0 {
 			utils.Error(c, 400, "实际工时不能为负数")
 			return
@@ -905,11 +1005,13 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	}
 
 	// 计算并更新实际工时（从资源分配中汇总）
-	h.calculateAndUpdateActualHours(&task)
+	if taskProject.ProjectType != "smart_warehouse" {
+		h.calculateAndUpdateActualHours(&task)
+	}
 
 	// 如果用户手动设置了进度，优先使用手动设置的进度，不根据工时自动计算
 	// 只有在没有手动设置进度时，才根据工时自动计算进度
-	if req.Progress == nil {
+	if req.Progress == nil && taskProject.ProjectType != "smart_warehouse" {
 		// 如果更新了实际工时或预估工时，自动根据工时计算进度
 		// 进度 = 实际工时 / 预估工时 * 100，范围0-100%
 		if req.ActualHours != nil || req.EstimatedHours != nil {
@@ -922,7 +1024,8 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 	// 如果 req.Progress != nil，说明用户手动设置了进度，已经在上面的代码中设置了，不需要再计算
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, task.ID)
+	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	utils.Success(c, task)
 }
