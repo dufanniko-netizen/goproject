@@ -82,6 +82,16 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 		return fmt.Errorf("IMAP认证失败: %w", err)
 	}
 	defer client.Logout().Wait()
+	// 网易126/163邮箱要求第三方客户端在选择邮箱前通过RFC 2971 ID命令声明身份，
+	// 否则即使登录成功也会以 Unsafe Login 拒绝 SELECT/EXAMINE INBOX。
+	if _, err := client.ID(&imap.IDData{
+		Name:    "GoProject Mail Collector",
+		Version: "1.0",
+		OS:      "Linux",
+		Vendor:  "GoProject",
+	}).Wait(); err != nil {
+		return fmt.Errorf("发送IMAP客户端身份失败: %w", err)
+	}
 	if _, err := client.Select("INBOX", nil).Wait(); err != nil {
 		return err
 	}
