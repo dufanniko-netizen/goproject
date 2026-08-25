@@ -239,11 +239,13 @@ func dateValue(value *time.Time) string {
 	return value.Format("2006-01-02")
 }
 func parseDate(value string) *time.Time {
-	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(value))
-	if err != nil {
-		return nil
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{"2006-01-02", "2006/1/2", "2006/01/02", "2006-1-2"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return &parsed
+		}
 	}
-	return &parsed
+	return nil
 }
 func safeFilename(value string) string {
 	return strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_").Replace(value)

@@ -45,6 +45,8 @@ export interface Task {
   created_at?: string
   updated_at?: string
   completed_at?: string
+  latest_update?: string
+  latest_update_at?: string
 }
 
 export interface TaskListResponse {
