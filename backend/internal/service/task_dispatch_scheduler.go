@@ -21,6 +21,14 @@ import (
 // StartTaskDispatchScheduler 启动智慧仓储任务的每日18点下发和回邮轮询。
 func StartTaskDispatchScheduler(db *gorm.DB) {
 	go func() {
+		imapEnabled := config.AppConfig.Email.IMAPEnabled || strings.EqualFold(strings.TrimSpace(os.Getenv("EMAIL_IMAP_ENABLED")), "true")
+		log.Printf("任务反馈调度器已启动: config_imap_enabled=%t, env_imap_enabled=%q, effective_enabled=%t, host=%q, user_configured=%t",
+			config.AppConfig.Email.IMAPEnabled,
+			os.Getenv("EMAIL_IMAP_ENABLED"),
+			imapEnabled,
+			config.AppConfig.Email.IMAPHost,
+			config.AppConfig.Email.Username != "",
+		)
 		lastDispatchCheck := ""
 		for {
 			now := time.Now()
@@ -28,7 +36,7 @@ func StartTaskDispatchScheduler(db *gorm.DB) {
 				dispatchAllSmartProjects(db)
 				lastDispatchCheck = now.Format("2006-01-02")
 			}
-			if config.AppConfig.Email.IMAPEnabled {
+			if imapEnabled {
 				if err := pollTaskReplyMailbox(db); err != nil {
 					log.Printf("任务反馈邮箱轮询失败: %v", err)
 				}
