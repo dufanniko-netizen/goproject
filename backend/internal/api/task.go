@@ -43,6 +43,17 @@ func inclusiveDays(start, end *time.Time) int {
 	return int(endDay.Sub(startDay).Hours()/24) + 1
 }
 
+func updateTaskCompletionTime(task *model.Task, previousStatus string, now time.Time) {
+	if task.Status == "done" {
+		if previousStatus != "done" || task.CompletedAt == nil {
+			completedAt := now
+			task.CompletedAt = &completedAt
+		}
+		return
+	}
+	task.CompletedAt = nil
+}
+
 func (h *TaskHandler) ensureProjectNotUnderReview(c *gin.Context, projectID uint) error {
 	var project model.Project
 	if err := h.db.Select("id", "approval_status").First(&project, projectID).Error; err != nil {
@@ -98,6 +109,11 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	if nodeType := c.Query("node_type"); nodeType != "" {
 		query = query.Where("node_type = ?", nodeType)
 	}
+	if c.Query("hide_historical_completed") == "true" {
+		today := time.Now()
+		startOfToday := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+		query = query.Where("status <> ? OR COALESCE(completed_at, updated_at) >= ?", "done", startOfToday)
+	}
 
 	// 分页
 	page := utils.GetPage(c)
@@ -139,6 +155,11 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	}
 	if nodeType := c.Query("node_type"); nodeType != "" {
 		countQuery = countQuery.Where("node_type = ?", nodeType)
+	}
+	if c.Query("hide_historical_completed") == "true" {
+		today := time.Now()
+		startOfToday := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+		countQuery = countQuery.Where("status <> ? OR COALESCE(completed_at, updated_at) >= ?", "done", startOfToday)
 	}
 
 	countQuery.Count(&total)
@@ -395,6 +416,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		// 仅借助 ProjectType 计算字段，创建任务时不写回项目关联。
 		task.Project = model.Project{}
 	}
+	updateTaskCompletionTime(&task, "", time.Now())
 
 	if err := h.db.Create(&task).Error; err != nil {
 		utils.Error(c, utils.CodeError, "创建失败")
@@ -515,6 +537,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 			return
 		}
 		task.Status = *req.Status
+		updateTaskCompletionTime(&task, oldTask.Status, time.Now())
 	}
 	if req.Priority != nil {
 		// 验证优先级
@@ -882,7 +905,9 @@ func (h *TaskHandler) UpdateTaskStatus(c *gin.Context) {
 		return
 	}
 
+	oldStatus := task.Status
 	task.Status = req.Status
+	updateTaskCompletionTime(&task, oldStatus, time.Now())
 	// 如果状态为done，自动设置进度为100
 	if req.Status == "done" {
 		task.Progress = 100
@@ -910,6 +935,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
+	oldStatus := task.Status
 
 	// 权限检查：普通用户只能更新自己创建或参与的任务
 	if !utils.CheckTaskAccess(h.db, c, task.ID) {
@@ -955,6 +981,7 @@ func (h *TaskHandler) UpdateTaskProgress(c *gin.Context) {
 			task.Status = "doing"
 		}
 	}
+	updateTaskCompletionTime(&task, oldStatus, time.Now())
 
 	// 更新预估工时
 	if req.EstimatedHours != nil && taskProject.ProjectType != "smart_warehouse" {

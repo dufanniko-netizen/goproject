@@ -42,6 +42,7 @@ export interface Task {
   required_support?: string
   created_at?: string
   updated_at?: string
+  completed_at?: string
 }
 
 export interface TaskListResponse {
@@ -101,6 +102,7 @@ export const getTasks = async (params?: {
   assignee_id?: number
   creator_id?: number
   node_type?: 'group' | 'task'
+  hide_historical_completed?: boolean
   page?: number
   size?: number
 }): Promise<TaskListResponse> => {

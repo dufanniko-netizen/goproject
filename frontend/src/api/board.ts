@@ -59,8 +59,8 @@ export const getBoard = async (id: number): Promise<Board> => {
   return request.get(`/boards/${id}`)
 }
 
-export const getBoardTasks = async (id: number): Promise<BoardTasksResponse> => {
-  return request.get(`/boards/${id}/tasks`)
+export const getBoardTasks = async (id: number, params?: { hide_historical_completed?: boolean }): Promise<BoardTasksResponse> => {
+  return request.get(`/boards/${id}/tasks`, { params })
 }
 
 export const createBoard = async (projectId: number, data: CreateBoardRequest): Promise<Board> => {

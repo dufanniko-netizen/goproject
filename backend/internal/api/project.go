@@ -381,10 +381,10 @@ func (h *ProjectHandler) getProjectStatistics(projectID uint) gin.H {
 	var inProgressRequirementCount, completedRequirementCount int64
 
 	// 任务统计
-	h.db.Model(&model.Task{}).Where("project_id = ?", projectID).Count(&taskCount)
-	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "wait").Count(&todoTaskCount)
-	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "doing").Count(&inProgressTaskCount)
-	h.db.Model(&model.Task{}).Where("project_id = ? AND status = ?", projectID, "done").Count(&doneTaskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND node_type = ?", projectID, "task").Count(&taskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND node_type = ? AND status = ?", projectID, "task", "wait").Count(&todoTaskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND node_type = ? AND status = ?", projectID, "task", "doing").Count(&inProgressTaskCount)
+	h.db.Model(&model.Task{}).Where("project_id = ? AND node_type = ? AND status = ?", projectID, "task", "done").Count(&doneTaskCount)
 
 	// Bug统计
 	h.db.Model(&model.Bug{}).Where("project_id = ?", projectID).Count(&bugCount)
@@ -894,7 +894,7 @@ func (h *ProjectHandler) GetProjectProgress(c *gin.Context) {
 // getTaskProgressTrend 获取任务进度趋势
 func (h *ProjectHandler) getTaskProgressTrend(projectID uint, days int) []gin.H {
 	var tasks []model.Task
-	h.db.Where("project_id = ? AND created_at >= ?", projectID, time.Now().AddDate(0, 0, -days)).
+	h.db.Where("project_id = ? AND node_type = ? AND created_at >= ?", projectID, "task", time.Now().AddDate(0, 0, -days)).
 		Order("created_at ASC").
 		Find(&tasks)
 
@@ -925,7 +925,7 @@ func (h *ProjectHandler) getTaskProgressTrend(projectID uint, days int) []gin.H 
 // getTaskStatusDistribution 获取任务状态分布
 func (h *ProjectHandler) getTaskStatusDistribution(projectID uint) []gin.H {
 	var tasks []model.Task
-	h.db.Where("project_id = ?", projectID).Find(&tasks)
+	h.db.Where("project_id = ? AND node_type = ?", projectID, "task").Find(&tasks)
 
 	statusCount := make(map[string]int)
 	for _, task := range tasks {
@@ -946,7 +946,7 @@ func (h *ProjectHandler) getTaskStatusDistribution(projectID uint) []gin.H {
 // getTaskPriorityDistribution 获取任务优先级分布
 func (h *ProjectHandler) getTaskPriorityDistribution(projectID uint) []gin.H {
 	var tasks []model.Task
-	h.db.Where("project_id = ?", projectID).Find(&tasks)
+	h.db.Where("project_id = ? AND node_type = ?", projectID, "task").Find(&tasks)
 
 	priorityCount := make(map[string]int)
 	for _, task := range tasks {
@@ -975,10 +975,10 @@ func (h *ProjectHandler) getTaskCompletionTrend(projectID uint, weeks int) []gin
 
 		var totalTasks, completedTasks int64
 		h.db.Model(&model.Task{}).
-			Where("project_id = ? AND created_at < ?", projectID, weekEnd).
+			Where("project_id = ? AND node_type = ? AND created_at < ?", projectID, "task", weekEnd).
 			Count(&totalTasks)
 		h.db.Model(&model.Task{}).
-			Where("project_id = ? AND status = ? AND updated_at >= ? AND updated_at < ?", projectID, "done", weekStart, weekEnd).
+			Where("project_id = ? AND node_type = ? AND status = ? AND updated_at >= ? AND updated_at < ?", projectID, "task", "done", weekStart, weekEnd).
 			Count(&completedTasks)
 
 		completionRate := 0.0
@@ -1000,7 +1000,7 @@ func (h *ProjectHandler) getTaskCompletionTrend(projectID uint, weeks int) []gin
 // getMemberWorkload 获取成员工作量统计
 func (h *ProjectHandler) getMemberWorkload(projectID uint) []gin.H {
 	var tasks []model.Task
-	h.db.Where("project_id = ? AND assignee_id IS NOT NULL", projectID).
+	h.db.Where("project_id = ? AND node_type = ? AND assignee_id IS NOT NULL", projectID, "task").
 		Preload("Assignee").
 		Find(&tasks)
 

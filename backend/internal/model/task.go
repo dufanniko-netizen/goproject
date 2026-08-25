@@ -42,9 +42,10 @@ type Task struct {
 	Counterpart     *User  `gorm:"foreignKey:CounterpartID" json:"counterpart,omitempty"`
 	CounterpartName string `gorm:"size:100" json:"counterpart_name"` // 甲方对口人（可为系统外姓名）
 
-	StartDate *time.Time `json:"start_date"` // 开始日期
-	EndDate   *time.Time `json:"end_date"`   // 结束日期
-	DueDate   *time.Time `json:"due_date"`   // 截止日期
+	StartDate   *time.Time `json:"start_date"`                // 开始日期
+	EndDate     *time.Time `json:"end_date"`                  // 结束日期
+	DueDate     *time.Time `json:"due_date"`                  // 截止日期
+	CompletedAt *time.Time `gorm:"index" json:"completed_at"` // 首次进入已完成状态的时间，用于次日自动隐藏
 
 	Progress int `gorm:"default:0" json:"progress"` // 进度：0-100
 

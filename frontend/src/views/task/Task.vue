@@ -9,6 +9,10 @@
               <a-space>
                 <span>分类管理</span>
                 <a-switch v-model:checked="showGroupNodes" @change="handleGroupModeChange" />
+                <template v-if="isSmartWarehouseTaskView">
+                  <span>显示历史已完成</span>
+                  <a-switch v-model:checked="showHistoricalCompleted" @change="handleHistoricalCompletedChange" />
+                </template>
                 <a-button type="primary" @click="handleCreate">
                   <template #icon><PlusOutlined /></template>
                   新增任务
@@ -328,17 +332,21 @@
             <a-textarea v-model:value="formData.required_support" :rows="3" placeholder="请输入完成任务所需的资源或协调支持" />
           </a-form-item>
         </template>
-        <a-form-item v-if="!isAutomationFormProject" label="父任务" name="parent_id">
+        <a-form-item v-if="!isAutomationFormProject && !formData.id" label="直接创建三级任务">
+          <a-switch v-model:checked="directLevel3Create" />
+          <span style="margin-left: 10px; color: #888">开启后选择二级分类，直接创建具体执行任务</span>
+        </a-form-item>
+        <a-form-item v-if="!isAutomationFormProject" :label="directLevel3Create && !formData.id ? '所属二级分类' : '父任务'" name="parent_id">
           <a-select
             v-model:value="formData.parent_id"
-            placeholder="不选择则创建一级任务"
+            :placeholder="directLevel3Create && !formData.id ? '请选择二级分类' : '不选择则创建一级任务'"
             allow-clear
             show-search
             :filter-option="filterTaskOption"
             :disabled="!formData.project_id"
           >
             <a-select-option
-              v-for="task in availableTasks.filter(item => (item.level || 1) < 3)"
+              v-for="task in availableTasks.filter(item => directLevel3Create && !formData.id ? item.level === 2 : (item.level || 1) < 3)"
               :key="task.id"
               :value="task.id"
             >
@@ -764,6 +772,8 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const tasks = ref<Task[]>([])
 const showGroupNodes = ref(false)
+const showHistoricalCompleted = ref(false)
+const directLevel3Create = ref(true)
 const projects = ref<Project[]>([])
 const requirements = ref<Requirement[]>([])
 const users = ref<User[]>([])
@@ -844,6 +854,7 @@ const automationColumns = [
 
 const selectedSearchProject = computed(() => projects.value.find(project => project.id === searchForm.project_id))
 const isAutomationTaskView = computed(() => selectedSearchProject.value?.project_type === 'automation')
+const isSmartWarehouseTaskView = computed(() => selectedSearchProject.value?.project_type === 'smart_warehouse')
 
 const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'counterpart', 'progress', 'dates']
 const savedVisibleColumns = localStorage.getItem('task_visible_columns')
@@ -1053,6 +1064,9 @@ const loadTasks = async () => {
     if (!showGroupNodes.value) {
       params.node_type = 'task'
     }
+    if (isSmartWarehouseTaskView.value && !showHistoricalCompleted.value) {
+      params.hide_historical_completed = true
+    }
     const response = await getTasks(params)
     tasks.value = response.list
     pagination.total = response.total
@@ -1188,6 +1202,7 @@ const handleTableChange = (pag: any) => {
 const handleCreate = () => {
   modalTitle.value = '新增任务'
   formData.id = undefined
+  directLevel3Create.value = true
   formData.title = ''
   formData.description = ''
   formData.status = 'wait'
@@ -1230,6 +1245,11 @@ const handleCreate = () => {
 }
 
 const handleGroupModeChange = () => {
+  pagination.current = 1
+  loadTasks()
+}
+
+const handleHistoricalCompletedChange = () => {
   pagination.current = 1
   loadTasks()
 }
@@ -1318,6 +1338,13 @@ const handleSubmit = async () => {
     if (!formData.project_id || formData.project_id === 0) {
       message.error('请选择项目')
       return
+    }
+    if (!isAutomationFormProject.value && directLevel3Create.value && !formData.id) {
+      const parent = availableTasks.value.find(task => task.id === formData.parent_id)
+      if (!parent || parent.level !== 2) {
+        message.error('直接创建三级任务时，请选择所属二级分类')
+        return
+      }
     }
     
     // 上传Markdown编辑器中的本地图片

@@ -30,3 +30,18 @@ func TestApplySmartWarehouseCalculatedHoursBeforeStart(t *testing.T) {
 		t.Fatalf("future task actual calculation = %d days/%v hours", task.ActualDays, task.ActualHours)
 	}
 }
+
+func TestUpdateTaskCompletionTime(t *testing.T) {
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.Local)
+	task := model.Task{Status: "done"}
+	updateTaskCompletionTime(&task, "doing", now)
+	if task.CompletedAt == nil || !task.CompletedAt.Equal(now) {
+		t.Fatalf("completion time was not recorded: %v", task.CompletedAt)
+	}
+
+	task.Status = "doing"
+	updateTaskCompletionTime(&task, "done", now.Add(time.Hour))
+	if task.CompletedAt != nil {
+		t.Fatalf("completion time was not cleared after reopening: %v", task.CompletedAt)
+	}
+}

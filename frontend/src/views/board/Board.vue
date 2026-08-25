@@ -11,6 +11,8 @@
           >
             <template #extra>
               <a-space>
+                <span>显示历史已完成</span>
+                <a-switch v-model:checked="showHistoricalCompleted" @change="loadBoardTasks" />
                 <a-button @click="handleEditBoard">编辑看板</a-button>
                 <a-button @click="handleManageColumns">管理列</a-button>
                 <a-button type="primary" @click="handleCreateTask">新建任务</a-button>
@@ -169,6 +171,7 @@ const board = ref<Board | null>(null)
 const tasksByColumn = ref<Record<number, Task[]>>({})
 const projectId = ref<number>(0)
 const draggedTask = ref<Task | null>(null)
+const showHistoricalCompleted = ref(false)
 
 const boardModalVisible = ref(false)
 const boardModalTitle = ref('编辑看板')
@@ -228,7 +231,9 @@ const loadBoard = async () => {
 const loadBoardTasks = async () => {
   if (!board.value) return
   try {
-    const response = await getBoardTasks(board.value.id)
+    const response = await getBoardTasks(board.value.id, {
+      hide_historical_completed: !showHistoricalCompleted.value
+    })
     tasksByColumn.value = response.tasks_by_column || {}
   } catch (error: any) {
     console.error('加载看板任务失败:', error)
