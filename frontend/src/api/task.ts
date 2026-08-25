@@ -18,6 +18,8 @@ export interface Task {
   counterpart_id?: number
   counterpart?: any
   counterpart_name?: string
+	 external_contact_id?: number
+	 external_contact?: ExternalTaskContact
   start_date?: string
   end_date?: string
   due_date?: string
@@ -63,6 +65,7 @@ export interface CreateTaskRequest {
   assignee_name?: string
   counterpart_id?: number
   counterpart_name?: string
+	 external_contact_id?: number
   start_date?: string
   end_date?: string
   due_date?: string
@@ -80,6 +83,18 @@ export interface CreateTaskRequest {
   plan_progress?: number
   reason_analysis?: string
   required_support?: string
+}
+
+export interface ExternalTaskContact {
+	id: number
+	project_id: number
+	name: string
+	company?: string
+	recipient?: string
+	email: string
+	cc_emails?: string
+	enabled: boolean
+	notes?: string
 }
 
 export interface UpdateTaskStatusRequest {

@@ -44,8 +44,12 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.History{},
 
 		// 任务与看板
+		&model.ExternalTaskContact{},
 		&model.Task{},
 		&model.TaskDependency{},
+		&model.TaskDispatchBatch{},
+		&model.TaskDispatchItem{},
+		&model.TaskTimeChangeRequest{},
 		&model.Board{},
 		&model.BoardColumn{},
 

@@ -72,7 +72,7 @@ func NewTaskHandler(db *gorm.DB) *TaskHandler {
 // GetTasks 获取任务列表
 func (h *TaskHandler) GetTasks(c *gin.Context) {
 	var tasks []model.Task
-	query := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies")
+	query := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("ExternalContact").Preload("Dependencies")
 
 	// 权限过滤：普通用户只能看到自己创建或参与的任务
 	query = utils.FilterTasksByUser(h.db, c, query)
@@ -184,7 +184,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	id := c.Param("id")
 	var task model.Task
-	if err := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, id).Error; err != nil {
+	if err := h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("ExternalContact").Preload("Dependencies").First(&task, id).Error; err != nil {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
@@ -202,31 +202,32 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 // CreateTask 创建任务
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var req struct {
-		Title           string   `json:"title" binding:"required"`
-		Description     string   `json:"description"`
-		Status          string   `json:"status"`
-		Priority        string   `json:"priority"`
-		ProjectID       uint     `json:"project_id" binding:"required"`
-		RequirementID   *uint    `json:"requirement_id"`
-		AssigneeID      *uint    `json:"assignee_id"`
-		AssigneeName    string   `json:"assignee_name"`
-		CounterpartID   *uint    `json:"counterpart_id"`
-		CounterpartName string   `json:"counterpart_name"`
-		StartDate       *string  `json:"start_date"`
-		EndDate         *string  `json:"end_date"`
-		DueDate         *string  `json:"due_date"`
-		Progress        int      `json:"progress"`
-		EstimatedHours  *float64 `json:"estimated_hours"`
-		DependencyIDs   []uint   `json:"dependency_ids"`
-		ParentID        *uint    `json:"parent_id"`
-		TaskSequence    string   `json:"task_sequence"`
-		Milestone1      string   `json:"milestone1"`
-		Milestone2      string   `json:"milestone2"`
-		Milestone3      string   `json:"milestone3"`
-		CurrentNode     string   `json:"current_node"`
-		PlanProgress    int      `json:"plan_progress"`
-		ReasonAnalysis  string   `json:"reason_analysis"`
-		RequiredSupport string   `json:"required_support"`
+		Title             string   `json:"title" binding:"required"`
+		Description       string   `json:"description"`
+		Status            string   `json:"status"`
+		Priority          string   `json:"priority"`
+		ProjectID         uint     `json:"project_id" binding:"required"`
+		RequirementID     *uint    `json:"requirement_id"`
+		AssigneeID        *uint    `json:"assignee_id"`
+		AssigneeName      string   `json:"assignee_name"`
+		CounterpartID     *uint    `json:"counterpart_id"`
+		CounterpartName   string   `json:"counterpart_name"`
+		ExternalContactID *uint    `json:"external_contact_id"`
+		StartDate         *string  `json:"start_date"`
+		EndDate           *string  `json:"end_date"`
+		DueDate           *string  `json:"due_date"`
+		Progress          int      `json:"progress"`
+		EstimatedHours    *float64 `json:"estimated_hours"`
+		DependencyIDs     []uint   `json:"dependency_ids"`
+		ParentID          *uint    `json:"parent_id"`
+		TaskSequence      string   `json:"task_sequence"`
+		Milestone1        string   `json:"milestone1"`
+		Milestone2        string   `json:"milestone2"`
+		Milestone3        string   `json:"milestone3"`
+		CurrentNode       string   `json:"current_node"`
+		PlanProgress      int      `json:"plan_progress"`
+		ReasonAnalysis    string   `json:"reason_analysis"`
+		RequiredSupport   string   `json:"required_support"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -326,6 +327,10 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		// 只要拥有下级节点，父节点就是分类，不再作为执行任务参与甘特图。
 		h.db.Model(&parent).Update("node_type", "group")
 	}
+	if project.ProjectType == "smart_warehouse" && nodeType == "task" && (req.CounterpartID == nil || *req.CounterpartID == 0) {
+		utils.Error(c, 400, "智慧仓储具体任务必须选择系统用户作为对口人")
+		return
+	}
 
 	// 如果指定了需求，验证需求是否存在且属于同一项目
 	if req.RequirementID != nil {
@@ -355,6 +360,15 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 			return
 		}
 	}
+	if req.ExternalContactID != nil && *req.ExternalContactID != 0 {
+		var contact model.ExternalTaskContact
+		if err := h.db.Where("id = ? AND project_id = ? AND enabled = ?", *req.ExternalContactID, req.ProjectID, true).First(&contact).Error; err != nil {
+			utils.Error(c, 400, "乙方联系人不存在、已停用或不属于当前项目")
+			return
+		}
+		req.AssigneeName = contact.Name
+		req.AssigneeID = nil
+	}
 
 	// 解析日期
 	var startDate, endDate, dueDate *time.Time
@@ -375,33 +389,34 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	task := model.Task{
-		Title:           req.Title,
-		Description:     req.Description,
-		Status:          req.Status,
-		Priority:        req.Priority,
-		ProjectID:       req.ProjectID,
-		RequirementID:   req.RequirementID,
-		CreatorID:       userID.(uint),
-		AssigneeID:      req.AssigneeID,
-		AssigneeName:    strings.TrimSpace(req.AssigneeName),
-		CounterpartID:   req.CounterpartID,
-		CounterpartName: strings.TrimSpace(req.CounterpartName),
-		StartDate:       startDate,
-		EndDate:         endDate,
-		DueDate:         dueDate,
-		Progress:        req.Progress,
-		EstimatedHours:  req.EstimatedHours,
-		ParentID:        req.ParentID,
-		Level:           level,
-		NodeType:        nodeType,
-		TaskSequence:    req.TaskSequence,
-		Milestone1:      req.Milestone1,
-		Milestone2:      req.Milestone2,
-		Milestone3:      req.Milestone3,
-		CurrentNode:     req.CurrentNode,
-		PlanProgress:    req.PlanProgress,
-		ReasonAnalysis:  req.ReasonAnalysis,
-		RequiredSupport: req.RequiredSupport,
+		Title:             req.Title,
+		Description:       req.Description,
+		Status:            req.Status,
+		Priority:          req.Priority,
+		ProjectID:         req.ProjectID,
+		RequirementID:     req.RequirementID,
+		CreatorID:         userID.(uint),
+		AssigneeID:        req.AssigneeID,
+		AssigneeName:      strings.TrimSpace(req.AssigneeName),
+		CounterpartID:     req.CounterpartID,
+		CounterpartName:   strings.TrimSpace(req.CounterpartName),
+		ExternalContactID: req.ExternalContactID,
+		StartDate:         startDate,
+		EndDate:           endDate,
+		DueDate:           dueDate,
+		Progress:          req.Progress,
+		EstimatedHours:    req.EstimatedHours,
+		ParentID:          req.ParentID,
+		Level:             level,
+		NodeType:          nodeType,
+		TaskSequence:      req.TaskSequence,
+		Milestone1:        req.Milestone1,
+		Milestone2:        req.Milestone2,
+		Milestone3:        req.Milestone3,
+		CurrentNode:       req.CurrentNode,
+		PlanProgress:      req.PlanProgress,
+		ReasonAnalysis:    req.ReasonAnalysis,
+		RequiredSupport:   req.RequiredSupport,
 	}
 	if task.AssigneeID != nil && *task.AssigneeID == 0 {
 		task.AssigneeID = nil
@@ -444,7 +459,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// 重新加载关联数据
-	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("Dependencies").First(&task, task.ID)
+	h.db.Preload("Project").Preload("Parent").Preload("Parent.Parent").Preload("Children").Preload("Requirement").Preload("Creator").Preload("Assignee").Preload("Counterpart").Preload("ExternalContact").Preload("Dependencies").First(&task, task.ID)
 	applySmartWarehouseCalculatedHours(&task, time.Now())
 
 	// 记录创建操作
@@ -481,33 +496,34 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	oldTask := task
 
 	var req struct {
-		Title           *string  `json:"title"`
-		Description     *string  `json:"description"`
-		Status          *string  `json:"status"`
-		Priority        *string  `json:"priority"`
-		ProjectID       *uint    `json:"project_id"`
-		RequirementID   *uint    `json:"requirement_id"`
-		AssigneeID      *uint    `json:"assignee_id"`
-		AssigneeName    *string  `json:"assignee_name"`
-		CounterpartID   *uint    `json:"counterpart_id"`
-		CounterpartName *string  `json:"counterpart_name"`
-		StartDate       *string  `json:"start_date"`
-		EndDate         *string  `json:"end_date"`
-		DueDate         *string  `json:"due_date"`
-		Progress        *int     `json:"progress"`
-		EstimatedHours  *float64 `json:"estimated_hours"`
-		ActualHours     *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
-		WorkDate        *string  `json:"work_date"`    // 工作日期（YYYY-MM-DD），用于资源分配
-		DependencyIDs   *[]uint  `json:"dependency_ids"`
-		ParentID        *uint    `json:"parent_id"`
-		TaskSequence    *string  `json:"task_sequence"`
-		Milestone1      *string  `json:"milestone1"`
-		Milestone2      *string  `json:"milestone2"`
-		Milestone3      *string  `json:"milestone3"`
-		CurrentNode     *string  `json:"current_node"`
-		PlanProgress    *int     `json:"plan_progress"`
-		ReasonAnalysis  *string  `json:"reason_analysis"`
-		RequiredSupport *string  `json:"required_support"`
+		Title             *string  `json:"title"`
+		Description       *string  `json:"description"`
+		Status            *string  `json:"status"`
+		Priority          *string  `json:"priority"`
+		ProjectID         *uint    `json:"project_id"`
+		RequirementID     *uint    `json:"requirement_id"`
+		AssigneeID        *uint    `json:"assignee_id"`
+		AssigneeName      *string  `json:"assignee_name"`
+		CounterpartID     *uint    `json:"counterpart_id"`
+		CounterpartName   *string  `json:"counterpart_name"`
+		ExternalContactID *uint    `json:"external_contact_id"`
+		StartDate         *string  `json:"start_date"`
+		EndDate           *string  `json:"end_date"`
+		DueDate           *string  `json:"due_date"`
+		Progress          *int     `json:"progress"`
+		EstimatedHours    *float64 `json:"estimated_hours"`
+		ActualHours       *float64 `json:"actual_hours"` // 实际工时，会自动创建资源分配
+		WorkDate          *string  `json:"work_date"`    // 工作日期（YYYY-MM-DD），用于资源分配
+		DependencyIDs     *[]uint  `json:"dependency_ids"`
+		ParentID          *uint    `json:"parent_id"`
+		TaskSequence      *string  `json:"task_sequence"`
+		Milestone1        *string  `json:"milestone1"`
+		Milestone2        *string  `json:"milestone2"`
+		Milestone3        *string  `json:"milestone3"`
+		CurrentNode       *string  `json:"current_node"`
+		PlanProgress      *int     `json:"plan_progress"`
+		ReasonAnalysis    *string  `json:"reason_analysis"`
+		RequiredSupport   *string  `json:"required_support"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -661,6 +677,24 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		if task.CounterpartName != "" {
 			task.CounterpartID = nil
 		}
+	}
+	if req.ExternalContactID != nil {
+		if *req.ExternalContactID == 0 {
+			task.ExternalContactID = nil
+		} else {
+			var contact model.ExternalTaskContact
+			if err := h.db.Where("id = ? AND project_id = ? AND enabled = ?", *req.ExternalContactID, task.ProjectID, true).First(&contact).Error; err != nil {
+				utils.Error(c, 400, "乙方联系人不存在、已停用或不属于当前项目")
+				return
+			}
+			task.ExternalContactID = req.ExternalContactID
+			task.AssigneeName = contact.Name
+			task.AssigneeID = nil
+		}
+	}
+	if taskProject.ProjectType == "smart_warehouse" && task.NodeType == "task" && task.CounterpartID == nil {
+		utils.Error(c, 400, "智慧仓储具体任务必须选择系统用户作为对口人")
+		return
 	}
 	if req.StartDate != nil {
 		if *req.StartDate != "" {

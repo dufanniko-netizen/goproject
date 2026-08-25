@@ -36,7 +36,9 @@ type Task struct {
 	AssigneeID *uint `gorm:"index" json:"assignee_id"`
 	Assignee   *User `gorm:"foreignKey:AssigneeID" json:"assignee,omitempty"`
 	// 智慧仓储任务允许填写系统外的乙方负责人，也允许选择系统用户。
-	AssigneeName string `gorm:"size:100" json:"assignee_name"`
+	AssigneeName      string               `gorm:"size:100" json:"assignee_name"`
+	ExternalContactID *uint                `gorm:"index" json:"external_contact_id"`
+	ExternalContact   *ExternalTaskContact `gorm:"foreignKey:ExternalContactID" json:"external_contact,omitempty"`
 
 	CounterpartID   *uint  `gorm:"index" json:"counterpart_id"`
 	Counterpart     *User  `gorm:"foreignKey:CounterpartID" json:"counterpart,omitempty"`
@@ -59,10 +61,12 @@ type Task struct {
 	ReasonAnalysis  string `gorm:"type:text" json:"reason_analysis"`
 	RequiredSupport string `gorm:"type:text" json:"required_support"`
 
-	EstimatedHours *float64 `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
-	ActualHours    *float64 `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
-	PlannedDays    int      `gorm:"-" json:"planned_days"`            // 智慧仓储任务计划天数（含首尾日期）
-	ActualDays     int      `gorm:"-" json:"actual_days"`             // 智慧仓储任务实际天数（含开始当天）
+	EstimatedHours *float64   `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
+	ActualHours    *float64   `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
+	PlannedDays    int        `gorm:"-" json:"planned_days"`            // 智慧仓储任务计划天数（含首尾日期）
+	ActualDays     int        `gorm:"-" json:"actual_days"`             // 智慧仓储任务实际天数（含开始当天）
+	LatestUpdate   string     `gorm:"type:text" json:"latest_update"`
+	LatestUpdateAt *time.Time `json:"latest_update_at"`
 
 	// 任务依赖关系（多对多）
 	Dependencies []Task `gorm:"many2many:task_dependencies;joinForeignKey:task_id;joinReferences:dependency_id" json:"dependencies,omitempty"`

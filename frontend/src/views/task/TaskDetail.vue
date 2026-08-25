@@ -347,14 +347,14 @@
           />
         </a-form-item>
         <a-form-item label="对口人（甲方）" name="counterpart_name">
-          <a-auto-complete
-            v-model:value="editFormData.counterpart_name"
-            :options="userNameOptions"
-            placeholder="输入姓名或选择系统用户"
+          <a-select
+            v-model:value="editFormData.counterpart_id"
+            placeholder="请选择系统用户"
             allow-clear
-            @change="handleCounterpartNameChange"
-            @select="(_value: string, option: any) => editFormData.counterpart_id = option.userId"
-          />
+            show-search
+          >
+            <a-select-option v-for="user in users" :key="user.id" :value="user.id">{{ formatUserName(user) }}</a-select-option>
+          </a-select>
         </a-form-item>
         <a-form-item label="开始日期" name="start_date">
           <a-date-picker
@@ -529,7 +529,6 @@ const formatUserName = (user: User) => `${user.username}${user.nickname ? `(${us
 const userNameOptions = computed(() => users.value.map(user => ({ value: formatUserName(user), label: formatUserName(user), userId: user.id })))
 const findUserByDisplayName = (value?: string) => users.value.find(user => formatUserName(user) === value)
 const handleAssigneeNameChange = (value: string) => { editFormData.assignee_id = findUserByDisplayName(value)?.id }
-const handleCounterpartNameChange = (value: string) => { editFormData.counterpart_id = findUserByDisplayName(value)?.id }
 const getAssigneeName = (item: Task) => item.assignee ? formatUserName(item.assignee) : item.assignee_name || '-'
 const getCounterpartName = (item: Task) => item.counterpart ? formatUserName(item.counterpart) : item.counterpart_name || '-'
 
@@ -657,7 +656,7 @@ const handleEditSubmit = async () => {
       assignee_id: editFormData.assignee_id || 0,
       assignee_name: editFormData.assignee_id ? '' : (editFormData.assignee_name || ''),
       counterpart_id: editFormData.counterpart_id || 0,
-      counterpart_name: editFormData.counterpart_id ? '' : (editFormData.counterpart_name || ''),
+      counterpart_name: '',
       start_date: editFormData.start_date && typeof editFormData.start_date !== 'string' && 'isValid' in editFormData.start_date && (editFormData.start_date as Dayjs).isValid() ? (editFormData.start_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.start_date === 'string' ? editFormData.start_date : undefined),
       end_date: editFormData.end_date && typeof editFormData.end_date !== 'string' && 'isValid' in editFormData.end_date && (editFormData.end_date as Dayjs).isValid() ? (editFormData.end_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.end_date === 'string' ? editFormData.end_date : undefined),
       due_date: isSmartWarehouse.value ? undefined : (editFormData.due_date && typeof editFormData.due_date !== 'string' && 'isValid' in editFormData.due_date && (editFormData.due_date as Dayjs).isValid() ? (editFormData.due_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.due_date === 'string' ? editFormData.due_date : undefined)),

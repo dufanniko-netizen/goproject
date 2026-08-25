@@ -2,13 +2,17 @@ package mailer
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"io"
 	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +46,15 @@ func SendProjectApproval(notification ProjectApprovalNotification) error {
 	return sendHTML(cfg, notification.RecipientEmail, subject, body)
 }
 
+// SendHTMLWithAttachment 发送带单个附件的 HTML 邮件。
+func SendHTMLWithAttachment(recipient, subject, body, filename string, attachment []byte) error {
+	cfg := config.AppConfig.Email
+	if !cfg.Enabled {
+		return fmt.Errorf("邮件功能未启用")
+	}
+	return sendMessage(cfg, recipient, buildMultipartMessage(cfg, recipient, subject, body, filename, attachment))
+}
+
 func buildProjectApprovalHTML(n ProjectApprovalNotification) string {
 	escape := html.EscapeString
 	recipient := escape(n.RecipientName)
@@ -61,6 +74,10 @@ func emptyAsDash(value string) string {
 }
 
 func sendHTML(cfg config.EmailConfig, recipient, subject, body string) error {
+	return sendMessage(cfg, recipient, buildMessage(cfg, recipient, subject, body))
+}
+
+func sendMessage(cfg config.EmailConfig, recipient, message string) error {
 	if cfg.Host == "" || cfg.Port <= 0 || cfg.FromAddress == "" {
 		return fmt.Errorf("邮件SMTP配置不完整")
 	}
@@ -121,7 +138,6 @@ func sendHTML(cfg config.EmailConfig, recipient, subject, body string) error {
 	if err != nil {
 		return fmt.Errorf("创建邮件正文失败: %w", err)
 	}
-	message := buildMessage(cfg, recipient, subject, body)
 	if _, err := io.WriteString(w, message); err != nil {
 		w.Close()
 		return fmt.Errorf("写入邮件正文失败: %w", err)
@@ -133,6 +149,35 @@ func sendHTML(cfg config.EmailConfig, recipient, subject, body string) error {
 		return fmt.Errorf("结束SMTP会话失败: %w", err)
 	}
 	return nil
+}
+
+func buildMultipartMessage(cfg config.EmailConfig, recipient, subject, body, filename string, attachment []byte) string {
+	var buffer strings.Builder
+	w := multipart.NewWriter(&buffer)
+	from := (&mail.Address{Name: cfg.FromName, Address: cfg.FromAddress}).String()
+	to := (&mail.Address{Address: recipient}).String()
+	buffer.WriteString("From: " + from + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("UTF-8", subject) + "\r\n")
+	buffer.WriteString("MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"" + w.Boundary() + "\"\r\n\r\n")
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Type", "text/html; charset=UTF-8")
+	h.Set("Content-Transfer-Encoding", "quoted-printable")
+	part, _ := w.CreatePart(h)
+	qp := quotedprintable.NewWriter(part)
+	_, _ = qp.Write([]byte(body))
+	_ = qp.Close()
+	h = make(textproto.MIMEHeader)
+	h.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	h.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, mime.QEncoding.Encode("UTF-8", filename)))
+	h.Set("Content-Transfer-Encoding", "base64")
+	part, _ = w.CreatePart(h)
+	encoded := base64.StdEncoding.EncodeToString(attachment)
+	for len(encoded) > 76 {
+		_, _ = io.WriteString(part, encoded[:76]+"\r\n")
+		encoded = encoded[76:]
+	}
+	_, _ = io.WriteString(part, encoded+"\r\n")
+	_ = w.Close()
+	return buffer.String()
 }
 
 func buildMessage(cfg config.EmailConfig, recipient, subject, body string) string {

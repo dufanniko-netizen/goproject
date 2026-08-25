@@ -13,6 +13,9 @@
                   <span>显示历史已完成</span>
                   <a-switch v-model:checked="showHistoricalCompleted" @change="handleHistoricalCompletedChange" />
                 </template>
+                <a-button v-if="isSmartWarehouseTaskView && searchForm.project_id" @click="dispatchCenterVisible = true">
+                  Excel 收发中心
+                </a-button>
                 <a-button type="primary" @click="handleCreate">
                   <template #icon><PlusOutlined /></template>
                   新增任务
@@ -398,27 +401,27 @@
             <a-select-option value="urgent">紧急</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="!isAutomationFormProject" label="负责人（乙方）" name="assignee_name">
-          <a-auto-complete
-            v-model:value="formData.assignee_name"
-            :options="userNameOptions"
-            placeholder="输入姓名或选择系统用户"
-            allow-clear
-            @change="handleAssigneeNameChange"
-            @select="handleAssigneeSelect"
-          />
-          <div class="form-help">可直接填写乙方姓名，也可选择系统用户</div>
+        <a-form-item v-if="isSmartWarehouseFormProject" label="负责人（乙方）" name="external_contact_id">
+          <a-select v-model:value="formData.external_contact_id" placeholder="从乙方联系人目录选择" allow-clear show-search :filter-option="filterExternalContact">
+            <a-select-option v-for="contact in externalContacts.filter(item => item.enabled)" :key="contact.id" :value="contact.id">
+              {{ contact.name }}{{ contact.company ? `（${contact.company}）` : '' }}
+            </a-select-option>
+          </a-select>
+          <div class="form-help">外部人员无需系统账号；请先在“Excel 收发中心”维护姓名和邮箱</div>
         </a-form-item>
         <a-form-item v-if="!isAutomationFormProject" label="对口人（甲方）" name="counterpart_name">
-          <a-auto-complete
-            v-model:value="formData.counterpart_name"
-            :options="userNameOptions"
-            placeholder="输入姓名或选择系统用户"
+          <a-select
+            v-model:value="formData.counterpart_id"
+            placeholder="请选择系统用户"
             allow-clear
-            @change="handleCounterpartNameChange"
-            @select="handleCounterpartSelect"
-          />
-          <div class="form-help">可直接填写甲方对口人，也可选择系统用户</div>
+            show-search
+            :filter-option="filterCounterpartOption"
+          >
+            <a-select-option v-for="user in users" :key="user.id" :value="user.id">
+              {{ formatUserName(user) }}
+            </a-select-option>
+          </a-select>
+          <div class="form-help">对口人必须是系统用户，负责审核任务时间变更</div>
         </a-form-item>
         <a-form-item label="开始日期" name="start_date">
           <a-date-picker
@@ -731,6 +734,12 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <TaskDispatchCenter
+      v-if="searchForm.project_id"
+      v-model:open="dispatchCenterVisible"
+      :project-id="searchForm.project_id"
+      @contacts-changed="externalContacts = $event"
+    />
   </div>
 </template>
 
@@ -745,6 +754,7 @@ import { formatDateTime, formatDate } from '@/utils/date'
 import AppHeader from '@/components/AppHeader.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import AttachmentUpload from '@/components/AttachmentUpload.vue'
+import TaskDispatchCenter from '@/components/TaskDispatchCenter.vue'
 import {
   getTasks,
   getTask,
@@ -758,8 +768,10 @@ import {
   type Task,
   type CreateTaskRequest,
   type UpdateTaskProgressRequest,
-  type Action
+  type Action,
+  type ExternalTaskContact
 } from '@/api/task'
+import { getTaskContacts } from '@/api/taskDispatch'
 import { getProjects, type Project } from '@/api/project'
 import { getRequirements, type Requirement } from '@/api/requirement'
 import { getUsers, type User } from '@/api/user'
@@ -779,6 +791,8 @@ const requirements = ref<Requirement[]>([])
 const users = ref<User[]>([])
 const availableTasks = ref<Task[]>([])
 const taskLoading = ref(false)
+const dispatchCenterVisible = ref(false)
+const externalContacts = ref<ExternalTaskContact[]>([])
 const searchFormVisible = ref(false) // 搜索栏显示/隐藏状态，默认折叠
 
 // 详情弹窗相关
@@ -950,6 +964,7 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   assignee_name: '',
   counterpart_id: undefined,
   counterpart_name: '',
+  external_contact_id: undefined,
   start_date: undefined,
   end_date: undefined,
   due_date: undefined,
@@ -972,26 +987,25 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
 const isAutomationFormProject = computed(() =>
   projects.value.find(project => project.id === formData.project_id)?.project_type === 'automation'
 )
+const isSmartWarehouseFormProject = computed(() =>
+  projects.value.find(project => project.id === formData.project_id)?.project_type === 'smart_warehouse'
+)
 
 const formatUserName = (user: User) => `${user.username}${user.nickname ? `(${user.nickname})` : ''}`
-const userNameOptions = computed(() => users.value.map(user => ({
-  value: formatUserName(user),
-  label: formatUserName(user),
-  userId: user.id
-})))
-
-const findUserByDisplayName = (value?: string) => users.value.find(user => formatUserName(user) === value)
-const handleAssigneeNameChange = (value: string) => {
-  formData.assignee_id = findUserByDisplayName(value)?.id
+const filterCounterpartOption = (input: string, option: any) => {
+  const user = users.value.find(item => item.id === option.value)
+  return !!user && formatUserName(user).toLowerCase().includes(input.toLowerCase())
 }
-const handleAssigneeSelect = (_value: string, option: any) => {
-  formData.assignee_id = option.userId
+const filterExternalContact = (input: string, option: any) => {
+  const contact = externalContacts.value.find(item => item.id === option.value)
+  return !!contact && `${contact.name} ${contact.company || ''} ${contact.email}`.toLowerCase().includes(input.toLowerCase())
 }
-const handleCounterpartNameChange = (value: string) => {
-  formData.counterpart_id = findUserByDisplayName(value)?.id
-}
-const handleCounterpartSelect = (_value: string, option: any) => {
-  formData.counterpart_id = option.userId
+const loadExternalContacts = async () => {
+  if (!isSmartWarehouseFormProject.value || !formData.project_id) {
+    externalContacts.value = []
+    return
+  }
+  externalContacts.value = await getTaskContacts(formData.project_id)
 }
 const getAssigneeName = (task: Task) => task.assignee
   ? `${task.assignee.username}${task.assignee.nickname ? `(${task.assignee.nickname})` : ''}`
@@ -1175,7 +1189,9 @@ const handleFormProjectChange = (value: number | undefined) => {
   // 原有的 handleProjectChange 逻辑
   formData.requirement_id = undefined
   formData.parent_id = undefined
+  formData.external_contact_id = undefined
   loadRequirementsForProject()
+  loadExternalContacts()
 }
 
 // 重置
@@ -1221,6 +1237,7 @@ const handleCreate = () => {
   formData.assignee_name = ''
   formData.counterpart_id = undefined
   formData.counterpart_name = ''
+  formData.external_contact_id = undefined
   formData.start_date = undefined
   formData.end_date = undefined
   formData.due_date = undefined
@@ -1276,6 +1293,8 @@ const handleEdit = async (record: Task) => {
   formData.assignee_name = record.assignee ? formatUserName(record.assignee) : (record.assignee_name || '')
   formData.counterpart_id = record.counterpart_id
   formData.counterpart_name = record.counterpart ? formatUserName(record.counterpart) : (record.counterpart_name || '')
+  formData.external_contact_id = record.external_contact_id
+  await loadExternalContacts()
   // 解析日期，确保日期有效
   if (record.start_date) {
     const startDate = dayjs(record.start_date)
@@ -1373,7 +1392,8 @@ const handleSubmit = async () => {
       assignee_id: formData.id ? (formData.assignee_id || 0) : formData.assignee_id,
       assignee_name: formData.assignee_id ? '' : (formData.assignee_name || ''),
       counterpart_id: formData.id ? (formData.counterpart_id || 0) : formData.counterpart_id,
-      counterpart_name: formData.counterpart_id ? '' : (formData.counterpart_name || ''),
+      counterpart_name: '',
+      external_contact_id: formData.id ? (formData.external_contact_id || 0) : formData.external_contact_id,
       start_date: formData.start_date && formData.start_date.isValid() ? formData.start_date.format('YYYY-MM-DD') : undefined,
       end_date: formData.end_date && formData.end_date.isValid() ? formData.end_date.format('YYYY-MM-DD') : undefined,
       progress: formData.progress,
