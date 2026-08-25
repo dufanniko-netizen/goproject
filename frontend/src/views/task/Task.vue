@@ -151,7 +151,6 @@
                 </template>
                 <template v-else-if="column.key === 'reason_analysis'">{{ record.reason_analysis || '-' }}</template>
                 <template v-else-if="column.key === 'required_support'">{{ record.required_support || '-' }}</template>
-                <template v-else-if="column.key === 'latest_update'">{{ record.latest_update || '-' }}</template>
                 <template v-else-if="column.key === 'level1'">
                   <a-button
                     v-if="record.node_type === 'group' && record.level === 1"
@@ -603,10 +602,6 @@
               <a-descriptions-item label="更新时间">
                 {{ formatDateTime(detailTask.updated_at) }}
               </a-descriptions-item>
-              <a-descriptions-item label="今日进展说明" :span="2">
-                {{ detailTask.latest_update || '-' }}
-                <span v-if="detailTask.latest_update_at" class="detail-update-time">（{{ formatDateTime(detailTask.latest_update_at) }}）</span>
-              </a-descriptions-item>
             </a-descriptions>
           </a-card>
 
@@ -852,7 +847,6 @@ const baseColumns = [
   { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
   { title: '日期', key: 'dates', width: 210 },
-  { title: '今日进展', key: 'latest_update', width: 220, ellipsis: true },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
@@ -876,7 +870,7 @@ const selectedSearchProject = computed(() => projects.value.find(project => proj
 const isAutomationTaskView = computed(() => selectedSearchProject.value?.project_type === 'automation')
 const isSmartWarehouseTaskView = computed(() => selectedSearchProject.value?.project_type === 'smart_warehouse')
 
-const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'counterpart', 'progress', 'dates', 'latest_update']
+const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'counterpart', 'progress', 'dates']
 const savedVisibleColumns = localStorage.getItem('task_visible_columns')
 const restoreVisibleColumns = () => {
   try {

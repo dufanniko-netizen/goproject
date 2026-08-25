@@ -30,7 +30,8 @@
           </template>
         </a-table>
       </a-tab-pane>
-      <a-tab-pane key="approvals" tab="时间变更审核">
+      <a-tab-pane key="approvals">
+        <template #tab><a-badge :count="pendingApprovalCount" :offset="[8, -2]">时间变更审核</a-badge></template>
         <a-space style="margin-bottom:12px"><a-button @click="loadApprovals">刷新</a-button></a-space>
         <a-table :data-source="approvals" :columns="approvalColumns" row-key="id" size="small" :pagination="{ pageSize: 10 }">
           <template #bodyCell="{ column, record }">
@@ -58,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { ExternalTaskContact } from '@/api/task'
 import {
@@ -73,6 +74,7 @@ const activeTab = ref('contacts')
 const contacts = ref<ExternalTaskContact[]>([])
 const batches = ref<TaskDispatchBatch[]>([])
 const approvals = ref<TaskTimeChangeRequest[]>([])
+const pendingApprovalCount = computed(() => approvals.value.filter(item => item.status === 'pending').length)
 const sending = ref(false)
 const contactModal = ref(false)
 const contactForm = reactive<Partial<ExternalTaskContact>>({ enabled: true })
@@ -80,7 +82,7 @@ const contactColumns = [{ title: '负责人/分组', dataIndex: 'name' }, { titl
 const batchColumns = [{ title: '日期', dataIndex: 'dispatch_date', width: 110 }, { title: '联系人', key: 'contact' }, { title: '任务数', dataIndex: 'task_count', width: 80 }, { title: '状态', key: 'status', width: 90 }, { title: '导入结果', key: 'result' }, { title: '发送时间', dataIndex: 'sent_at' }]
 const approvalColumns = [{ title: '任务', key: 'task' }, { title: '申请日期', key: 'dates', width: 210 }, { title: '原因', dataIndex: 'reason' }, { title: '状态', key: 'status', width: 90 }, { title: '操作', key: 'action', width: 120 }]
 
-watch(() => props.open, value => { if (value) loadActiveTab() })
+watch(() => props.open, value => { if (value) { loadActiveTab(); loadApprovals() } })
 const loadContacts = async () => { contacts.value = await getTaskContacts(props.projectId); emit('contactsChanged', contacts.value) }
 const loadBatches = async () => { batches.value = await getTaskDispatches(props.projectId) }
 const loadApprovals = async () => { approvals.value = await getTimeChangeRequests() }

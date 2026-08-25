@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"html"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -149,6 +150,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 			return &batch, nil
 		}
 	}
+	createdRequestIDs := make([]uint, 0)
 	err = db.Transaction(func(tx *gorm.DB) error {
 		success, failed := 0, 0
 		for _, row := range rows[1:] {
@@ -176,6 +178,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 				updateCompletionTime(&task, oldStatus)
 			}
 			if note := strings.TrimSpace(cell(row, 9)); note != "" {
+				task.Description = note
 				task.LatestUpdate = note
 				now := time.Now()
 				task.LatestUpdateAt = &now
@@ -195,6 +198,7 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 					failed++
 					continue
 				}
+				createdRequestIDs = append(createdRequestIDs, request.ID)
 			}
 			success++
 		}
@@ -203,7 +207,29 @@ func ImportWorkbook(db *gorm.DB, data []byte, sourceMessage string) (*model.Task
 		batch.SuccessCount, batch.FailureCount = success, failed
 		return tx.Save(&batch).Error
 	})
+	if err == nil {
+		sendTimeChangeReminders(db, createdRequestIDs)
+	}
 	return &batch, err
+}
+
+func sendTimeChangeReminders(db *gorm.DB, requestIDs []uint) {
+	for _, requestID := range requestIDs {
+		var request model.TaskTimeChangeRequest
+		if err := db.Preload("Task").Preload("Task.Project").Preload("Reviewer").First(&request, requestID).Error; err != nil {
+			log.Printf("读取时间变更提醒失败(request_id=%d): %v", requestID, err)
+			continue
+		}
+		if strings.TrimSpace(request.Reviewer.Email) == "" {
+			log.Printf("任务对口人未配置邮箱，无法发送时间变更提醒(request_id=%d, reviewer_id=%d)", requestID, request.ReviewerID)
+			continue
+		}
+		body := fmt.Sprintf("<p>%s，您好：</p><p>任务 <strong>%s</strong> 收到时间变更申请，请登录项目管理系统，在“Excel 收发中心 → 时间变更审核”中处理。</p><p>项目：%s</p><p>申请开始日期：%s</p><p>申请结束日期：%s</p><p>原因：%s</p><p style=\"color:#888\">此邮件由系统自动发送，请勿直接回复。</p>",
+			html.EscapeString(request.Reviewer.Nickname), html.EscapeString(request.Task.Title), html.EscapeString(request.Task.Project.Name), dateValue(request.RequestedStart), dateValue(request.RequestedEnd), html.EscapeString(request.Reason))
+		if err := mailer.SendHTML(request.Reviewer.Email, "[待审核] 任务时间变更申请："+request.Task.Title, body); err != nil {
+			log.Printf("发送时间变更提醒失败(request_id=%d): %v", requestID, err)
+		}
+	}
 }
 
 func updateCompletionTime(task *model.Task, oldStatus string) {

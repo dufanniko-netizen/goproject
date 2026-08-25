@@ -55,6 +55,15 @@ func SendHTMLWithAttachment(recipient, subject, body, filename string, attachmen
 	return sendMessage(cfg, recipient, buildMultipartMessage(cfg, recipient, subject, body, filename, attachment))
 }
 
+// SendHTML 发送不带附件的通用系统提醒邮件。
+func SendHTML(recipient, subject, body string) error {
+	cfg := config.AppConfig.Email
+	if !cfg.Enabled {
+		return fmt.Errorf("邮件功能未启用")
+	}
+	return sendHTML(cfg, recipient, subject, body)
+}
+
 func buildProjectApprovalHTML(n ProjectApprovalNotification) string {
 	escape := html.EscapeString
 	recipient := escape(n.RecipientName)
