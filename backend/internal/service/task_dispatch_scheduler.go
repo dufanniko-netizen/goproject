@@ -17,8 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emersion/go-imap/v2"
-	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-imap"
+	imapid "github.com/emersion/go-imap-id"
+	"github.com/emersion/go-imap/client"
 	"gorm.io/gorm"
 
 	"project-management/internal/config"
@@ -73,69 +74,76 @@ func pollTaskReplyMailbox(db *gorm.DB) error {
 		return fmt.Errorf("IMAP配置不完整")
 	}
 	address := cfg.IMAPHost + ":" + strconv.Itoa(cfg.IMAPPort)
-	client, err := imapclient.DialTLS(address, &imapclient.Options{TLSConfig: &tls.Config{ServerName: cfg.IMAPHost, MinVersion: tls.VersionTLS12}})
+	imapClient, err := client.DialTLS(address, &tls.Config{ServerName: cfg.IMAPHost, MinVersion: tls.VersionTLS12})
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	if err := client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
+	defer imapClient.Logout()
+	if err := imapClient.Login(cfg.Username, cfg.Password); err != nil {
 		return fmt.Errorf("IMAP认证失败: %w", err)
 	}
-	defer client.Logout().Wait()
 	// 网易126/163邮箱要求第三方客户端在选择邮箱前通过RFC 2971 ID命令声明身份，
 	// 否则即使登录成功也会以 Unsafe Login 拒绝 SELECT/EXAMINE INBOX。
-	if _, err := client.ID(&imap.IDData{
-		Name:    "GoProject Mail Collector",
-		Version: "1.0",
-		OS:      "Linux",
-		Vendor:  "GoProject",
-	}).Wait(); err != nil {
+	if _, err := imapid.NewClient(imapClient).ID(imapid.ID{
+		imapid.FieldName:    "GoProject",
+		imapid.FieldVersion: "1.0",
+	}); err != nil {
 		return fmt.Errorf("发送IMAP客户端身份失败: %w", err)
 	}
-	if _, err := client.Select("INBOX", nil).Wait(); err != nil {
+	if _, err := imapClient.Select("INBOX", true); err != nil {
 		return err
 	}
 	// 不只扫描未读邮件：网页邮箱或手机客户端可能在系统轮询前将回复标记为已读。
 	// ImportWorkbook 会使用 Message-ID、UID、附件序号和批次状态保证重复扫描幂等。
-	search, err := client.UIDSearch(&imap.SearchCriteria{Since: time.Now().AddDate(0, 0, -14)}, nil).Wait()
+	criteria := imap.NewSearchCriteria()
+	criteria.Since = time.Now().AddDate(0, 0, -14)
+	uids, err := imapClient.UidSearch(criteria)
 	if err != nil {
 		return err
 	}
-	uids := search.AllUIDs()
 	if len(uids) == 0 {
 		return nil
 	}
-	section := &imap.FetchItemBodySection{Peek: true}
-	messages, err := client.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{UID: true, Envelope: true, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
-	if err != nil {
-		return err
-	}
-	for _, message := range messages {
-		body := message.FindBodySection(section)
-		if len(body) == 0 {
+	sequenceSet := new(imap.SeqSet)
+	sequenceSet.AddNum(uids...)
+	section := &imap.BodySectionName{Peek: true}
+	messages := make(chan *imap.Message, len(uids))
+	fetchDone := make(chan error, 1)
+	go func() {
+		fetchDone <- imapClient.UidFetch(sequenceSet, []imap.FetchItem{imap.FetchUid, section.FetchItem()}, messages)
+	}()
+	for message := range messages {
+		body := message.GetBody(section)
+		if body == nil {
 			continue
 		}
-		attachments, messageID, err := xlsxAttachments(body)
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			log.Printf("读取回邮失败(uid=%d): %v", message.Uid, err)
+			continue
+		}
+		attachments, messageID, err := xlsxAttachments(raw)
 		if err != nil || len(attachments) == 0 {
 			continue
 		}
 		processed := false
 		for index, attachment := range attachments {
-			source := fmt.Sprintf("imap:%s:%d:%d", messageID, message.UID, index)
+			source := fmt.Sprintf("imap:%s:%d:%d", messageID, message.Uid, index)
 			if _, err := ImportWorkbook(db, attachment, source); err != nil {
-				log.Printf("回邮附件导入失败(uid=%d): %v", message.UID, err)
+				log.Printf("回邮附件导入失败(uid=%d): %v", message.Uid, err)
 				continue
 			}
 			processed = true
 		}
 		if processed {
-			flags := imap.StoreFlags{Op: imap.StoreFlagsAdd, Flags: []imap.Flag{imap.FlagSeen}, Silent: true}
-			if err := client.Store(imap.UIDSetNum(message.UID), &flags, nil).Close(); err != nil {
-				log.Printf("邮件标记已读失败(uid=%d): %v", message.UID, err)
+			messageSet := new(imap.SeqSet)
+			messageSet.AddNum(message.Uid)
+			if err := imapClient.UidStore(messageSet, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil); err != nil {
+				log.Printf("邮件标记已读失败(uid=%d): %v", message.Uid, err)
 			}
 		}
 	}
-	return nil
+	return <-fetchDone
 }
 
 func xlsxAttachments(raw []byte) ([][]byte, string, error) {

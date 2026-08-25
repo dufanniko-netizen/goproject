@@ -5,8 +5,9 @@ go 1.24.0
 toolchain go1.24.10
 
 require (
+	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-imap-id v0.0.0-20190926060100-f94a56b9ecde
 	github.com/gin-contrib/cors v1.7.6
-	github.com/emersion/go-imap/v2 v2.0.0-beta.7
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
