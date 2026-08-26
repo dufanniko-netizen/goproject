@@ -1,7 +1,7 @@
 <template>
   <a-layout-header class="header">
     <div class="header-left">
-      <div class="logo">项目管理系统</div>
+      <div class="logo">精益创新部</div>
       <a-menu
         mode="horizontal"
         :selected-keys="selectedKeys"
@@ -133,7 +133,7 @@
       <div v-if="versionInfo" class="about-content">
         <a-descriptions :column="1" bordered>
           <a-descriptions-item label="系统名称">
-            项目管理系统
+            精益创新部
           </a-descriptions-item>
           <a-descriptions-item label="版本号">
             {{ versionInfo.version || '未知' }}

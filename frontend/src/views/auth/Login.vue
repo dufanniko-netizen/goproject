@@ -2,7 +2,7 @@
   <div class="login-container">
     <a-card class="login-card" :bordered="false">
       <template #title>
-        <h2>项目管理系统</h2>
+        <h2>精益创新部</h2>
       </template>
       <div class="login-content">
         <a-tabs v-model:activeKey="loginType" centered>

@@ -3,7 +3,7 @@
     <a-card class="init-card" :bordered="false">
       <template #title>
         <h2>系统初始化</h2>
-        <p class="subtitle">欢迎使用项目管理系统，请完成初始配置</p>
+        <p class="subtitle">欢迎使用精益创新部管理系统，请完成初始配置</p>
       </template>
       
       <!-- 登录创建管理员 -->
