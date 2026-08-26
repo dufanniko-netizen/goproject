@@ -838,7 +838,7 @@ const pagination = reactive({
 
 // 计算表格滚动高度
 const tableScrollHeight = computed(() => {
-  return 'calc(100vh - 342px)'
+  return 'calc(100vh - 280px)'
 })
 
 const baseColumns = [
@@ -1978,15 +1978,17 @@ onMounted(async () => {
 }
 
 .table-card :deep(.ant-table-thead > tr > th) {
-  height: 42px;
-  padding: 8px 12px;
+  height: 38px;
+  padding: 6px 12px;
+  line-height: 24px;
   white-space: nowrap;
 }
 
 .table-card :deep(.ant-table-tbody > tr > td) {
-  height: 42px;
-  max-height: 42px;
-  padding: 5px 12px;
+  height: 38px;
+  max-height: 38px;
+  padding: 3px 12px;
+  line-height: 28px;
   white-space: nowrap;
 }
 
