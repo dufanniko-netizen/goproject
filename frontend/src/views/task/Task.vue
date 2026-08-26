@@ -16,6 +16,12 @@
                 <a-button v-if="isSmartWarehouseTaskView && searchForm.project_id" @click="dispatchCenterVisible = true">
                   Excel 收发中心
                 </a-button>
+                <a-button v-if="searchForm.project_id" @click="router.push(`/project/${searchForm.project_id}/gantt`)">
+                  甘特图
+                </a-button>
+                <a-button v-if="searchForm.project_id" @click="router.push(`/project/${searchForm.project_id}/progress`)">
+                  进度跟踪
+                </a-button>
                 <a-button type="primary" @click="handleCreate">
                   <template #icon><PlusOutlined /></template>
                   新增任务

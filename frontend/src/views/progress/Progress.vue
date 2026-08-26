@@ -6,10 +6,13 @@
         <div class="content-inner">
           <a-page-header
             :title="`进度跟踪 - ${project?.name || ''}`"
-            @back="() => router.push(`/project/${projectId}`)"
+            @back="() => router.push({ path: '/task', query: { project_id: projectId } })"
           >
             <template #extra>
-              <a-button @click="handleRefresh">刷新</a-button>
+              <a-space>
+                <a-button @click="router.push({ path: '/task', query: { project_id: projectId } })">返回任务管理</a-button>
+                <a-button @click="handleRefresh">刷新</a-button>
+              </a-space>
             </template>
           </a-page-header>
 
