@@ -9,6 +9,19 @@
               <a-space>
                 <span>分类管理</span>
                 <a-switch v-model:checked="showGroupNodes" @change="handleGroupModeChange" />
+                <template v-if="isSmartWarehouseTaskView">
+                  <span>显示历史已完成</span>
+                  <a-switch v-model:checked="showHistoricalCompleted" @change="handleHistoricalCompletedChange" />
+                </template>
+                <a-button v-if="isSmartWarehouseTaskView && searchForm.project_id" @click="dispatchCenterVisible = true">
+                  Excel 收发中心
+                </a-button>
+                <a-button v-if="searchForm.project_id" @click="router.push(`/project/${searchForm.project_id}/gantt`)">
+                  甘特图
+                </a-button>
+                <a-button v-if="searchForm.project_id" @click="router.push(`/project/${searchForm.project_id}/progress`)">
+                  进度跟踪
+                </a-button>
                 <a-button type="primary" @click="handleCreate">
                   <template #icon><PlusOutlined /></template>
                   新增任务
@@ -17,24 +30,42 @@
             </template>
           </a-page-header>
 
-          <a-card
-            :bordered="false"
-            class="search-card"
-            :class="{ 'search-card-collapsed': !searchFormVisible }"
-            style="margin-bottom: 16px"
-          >
-            <template #title>
-              <a-space>
-                <span>搜索条件</span>
-                <a-button type="text" size="small" @click="toggleSearchForm">
-                  <template #icon>
-                    <UpOutlined v-if="searchFormVisible" />
-                    <DownOutlined v-else />
-                  </template>
-                  {{ searchFormVisible ? '收起' : '展开' }}
-                </a-button>
-              </a-space>
-            </template>
+          <div class="task-toolbar">
+            <a-space>
+              <a-button type="text" @click="toggleSearchForm">
+                <template #icon><FilterOutlined /></template>
+                筛选
+                <UpOutlined v-if="searchFormVisible" />
+                <DownOutlined v-else />
+              </a-button>
+              <a-button v-if="showGroupNodes" type="text" @click="toggleAllGroups">
+                {{ allGroupsCollapsed ? '全部展开' : '全部折叠' }}
+              </a-button>
+            </a-space>
+            <a-popover trigger="click" placement="bottomRight">
+              <template #content>
+                <div class="column-settings">
+                  <div class="column-settings-title">显示列</div>
+                  <a-checkbox-group v-model:value="visibleColumnKeys">
+                    <a-checkbox
+                      v-for="column in configurableColumns"
+                      :key="column.key"
+                      :value="column.key"
+                    >
+                      {{ column.title }}
+                    </a-checkbox>
+                  </a-checkbox-group>
+                  <a-button type="link" size="small" @click="resetVisibleColumns">恢复默认</a-button>
+                </div>
+              </template>
+              <a-button type="text">
+                <template #icon><SettingOutlined /></template>
+                列设置
+              </a-button>
+            </a-popover>
+          </div>
+
+          <a-card v-show="searchFormVisible" :bordered="false" class="search-card">
             <a-form v-show="searchFormVisible" layout="inline" :model="searchForm">
               <a-form-item label="关键词">
                 <a-input
@@ -70,10 +101,12 @@
                   allow-clear
                   style="width: 120px"
                 >
-                  <a-select-option value="todo">待办</a-select-option>
-                  <a-select-option value="in_progress">进行中</a-select-option>
+                  <a-select-option value="wait">未开始</a-select-option>
+                  <a-select-option value="doing">进行中</a-select-option>
                   <a-select-option value="done">已完成</a-select-option>
-                  <a-select-option value="cancelled">已取消</a-select-option>
+                  <a-select-option value="pause">已暂停</a-select-option>
+                  <a-select-option value="cancel">已取消</a-select-option>
+                  <a-select-option value="closed">已延期</a-select-option>
                 </a-select>
               </a-form-item>
               <a-form-item label="优先级">
@@ -99,7 +132,7 @@
           <a-card :bordered="false" class="table-card">
             <a-table
               :columns="columns"
-              :data-source="tasks"
+              :data-source="visibleTasks"
               :loading="loading"
               :pagination="pagination"
               :scroll="{ x: 'max-content', y: tableScrollHeight }"
@@ -111,10 +144,44 @@
               })"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'level1'">
+                <template v-if="column.key === 'task_sequence'">{{ record.task_sequence || '-' }}</template>
+                <template v-else-if="column.key === 'automation_title'">{{ record.title }}</template>
+                <template v-else-if="column.key === 'automation_start'">{{ record.start_date ? formatDate(record.start_date) : '-' }}</template>
+                <template v-else-if="column.key === 'automation_end'">{{ record.end_date ? formatDate(record.end_date) : '-' }}</template>
+                <template v-else-if="column.key === 'milestone1'">{{ record.milestone1 || '-' }}</template>
+                <template v-else-if="column.key === 'milestone2'">{{ record.milestone2 || '-' }}</template>
+                <template v-else-if="column.key === 'milestone3'">{{ record.milestone3 || '-' }}</template>
+                <template v-else-if="column.key === 'current_node'">{{ record.current_node || '-' }}</template>
+                <template v-else-if="column.key === 'plan_progress'">
+                  <a-progress :percent="record.plan_progress || 0" />
+                </template>
+                <template v-else-if="column.key === 'reason_analysis'">{{ record.reason_analysis || '-' }}</template>
+                <template v-else-if="column.key === 'required_support'">{{ record.required_support || '-' }}</template>
+                <template v-else-if="column.key === 'latest_update'">{{ record.latest_update || '-' }}</template>
+                <template v-else-if="column.key === 'level1'">
+                  <a-button
+                    v-if="record.node_type === 'group' && record.level === 1"
+                    type="text"
+                    size="small"
+                    class="group-toggle"
+                    @click.stop="toggleGroup(record.id)"
+                  >
+                    <RightOutlined v-if="collapsedGroupIds.has(record.id)" />
+                    <DownOutlined v-else />
+                  </a-button>
                   {{ getLevelTitle(record, 1) }}
                 </template>
                 <template v-else-if="column.key === 'level2'">
+                  <a-button
+                    v-if="record.node_type === 'group' && record.level === 2"
+                    type="text"
+                    size="small"
+                    class="group-toggle"
+                    @click.stop="toggleGroup(record.id)"
+                  >
+                    <RightOutlined v-if="collapsedGroupIds.has(record.id)" />
+                    <DownOutlined v-else />
+                  </a-button>
                   {{ getLevelTitle(record, 2) }}
                 </template>
                 <template v-else-if="column.key === 'specific'">
@@ -140,7 +207,10 @@
                   {{ record.requirement?.title || '-' }}
                 </template>
                 <template v-else-if="column.key === 'assignee'">
-                  {{ record.node_type === 'group' ? '-' : (record.assignee ? `${record.assignee.username}${record.assignee.nickname ? `(${record.assignee.nickname})` : ''}` : '-') }}
+                  {{ record.node_type === 'group' ? '-' : getAssigneeName(record) }}
+                </template>
+                <template v-else-if="column.key === 'counterpart'">
+                  {{ record.node_type === 'group' ? '-' : getCounterpartName(record) }}
                 </template>
                 <template v-else-if="column.key === 'progress'">
                   <span v-if="record.node_type === 'group'">-</span>
@@ -149,61 +219,49 @@
                 <template v-else-if="column.key === 'hours'">
                   <span v-if="record.node_type === 'group'">-</span>
                   <div v-else>
-                    <div v-if="record.estimated_hours">预估: {{ record.estimated_hours.toFixed(2) }}h</div>
-                    <div v-if="record.actual_hours">实际: {{ record.actual_hours.toFixed(2) }}h</div>
-                    <span v-if="!record.estimated_hours && !record.actual_hours">-</span>
+                    <div>计划: {{ record.planned_days || 0 }}天 / {{ record.estimated_hours || 0 }}h</div>
+                    <div>实际: {{ record.actual_days || 0 }}天 / {{ record.actual_hours || 0 }}h</div>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'dates'">
                   <span v-if="record.node_type === 'group'">-</span>
-                  <div v-else>
-                    <div v-if="record.start_date">开始: {{ formatDate(record.start_date) }}</div>
-                    <div v-if="record.end_date">结束: {{ formatDate(record.end_date) }}</div>
-                    <div v-if="record.due_date" :style="{ color: isOverdue(record.due_date, record.status) ? 'red' : '' }">
-                      截止: {{ formatDate(record.due_date) }}
-                    </div>
-                  </div>
+                  <a-tooltip v-else :title="getTaskDateTooltip(record)">
+                    <span
+                      class="task-date-range"
+                    >
+                      {{ getTaskDateRange(record) }}
+                    </span>
+                  </a-tooltip>
                 </template>
                 <template v-else-if="column.key === 'created_at'">
                   {{ formatDateTime(record.created_at) }}
                 </template>
                 <template v-else-if="column.key === 'action'">
-                  <a-space @click.stop>
-                    <a-button
-                      v-if="record.node_type === 'group' && (record.level || 1) < 3"
-                      type="link"
-                      size="small"
-                      @click.stop="handleCreateChild(record)"
-                    >
-                      添加下级
-                    </a-button>
+                  <a-space :size="0" @click.stop>
                     <a-button type="link" size="small" @click.stop="handleEdit(record)">
                       编辑
                     </a-button>
-                    <a-button v-if="record.node_type !== 'group'" type="link" size="small" @click.stop="handleUpdateProgress(record)">
-                      进度
-                    </a-button>
-                    <a-dropdown v-if="record.node_type !== 'group'">
-                      <a-button type="link" size="small">
-                        状态 <DownOutlined />
+                    <a-dropdown>
+                      <a-button type="link" size="small" @click.stop>
+                        更多 <DownOutlined />
                       </a-button>
                       <template #overlay>
-                        <a-menu @click="(e: any) => handleStatusChange(record.id, e.key as string)">
-                          <a-menu-item key="wait">未开始</a-menu-item>
-                          <a-menu-item key="doing">进行中</a-menu-item>
-                          <a-menu-item key="done">已完成</a-menu-item>
-                          <a-menu-item key="pause">已暂停</a-menu-item>
-                          <a-menu-item key="cancel">已取消</a-menu-item>
-                          <a-menu-item key="closed">已延期</a-menu-item>
+                        <a-menu @click="(e: any) => handleActionMenu(record, e.key as string)">
+                          <a-menu-item v-if="record.node_type === 'group' && (record.level || 1) < 3" key="add-child">添加下级</a-menu-item>
+                          <a-menu-item v-if="record.node_type !== 'group' && record.project?.project_type !== 'automation'" key="progress">更新进度</a-menu-item>
+                          <a-sub-menu v-if="record.node_type !== 'group' && record.project?.project_type !== 'automation'" key="status" title="修改状态">
+                            <a-menu-item key="status:wait">未开始</a-menu-item>
+                            <a-menu-item key="status:doing">进行中</a-menu-item>
+                            <a-menu-item key="status:done">已完成</a-menu-item>
+                            <a-menu-item key="status:pause">已暂停</a-menu-item>
+                            <a-menu-item key="status:cancel">已取消</a-menu-item>
+                            <a-menu-item key="status:closed">已延期</a-menu-item>
+                          </a-sub-menu>
+                          <a-menu-divider />
+                          <a-menu-item key="delete" danger>删除</a-menu-item>
                         </a-menu>
                       </template>
                     </a-dropdown>
-                    <a-popconfirm
-                      title="确定要删除这个任务吗？"
-                      @confirm="handleDelete(record.id)"
-                    >
-                      <a-button type="link" size="small" danger @click.stop>删除</a-button>
-                    </a-popconfirm>
                   </a-space>
                 </template>
               </template>
@@ -232,7 +290,7 @@
         <a-form-item label="任务标题" name="title">
           <a-input v-model:value="formData.title" placeholder="请输入任务标题" />
         </a-form-item>
-        <a-form-item label="任务描述" name="description">
+        <a-form-item v-if="!isAutomationFormProject" label="任务描述" name="description">
           <MarkdownEditor
             ref="descriptionEditorRef"
             v-model="formData.description"
@@ -258,17 +316,47 @@
             </a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="父任务" name="parent_id">
+        <template v-if="isAutomationFormProject">
+          <a-form-item label="任务序号" name="task_sequence">
+            <a-input v-model:value="formData.task_sequence" placeholder="例如：1、1.1、A-01" />
+          </a-form-item>
+          <a-form-item label="重要里程碑1" name="milestone1">
+            <a-input v-model:value="formData.milestone1" placeholder="请输入第一个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="重要里程碑2" name="milestone2">
+            <a-input v-model:value="formData.milestone2" placeholder="请输入第二个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="重要里程碑3" name="milestone3">
+            <a-input v-model:value="formData.milestone3" placeholder="请输入第三个重要里程碑" />
+          </a-form-item>
+          <a-form-item label="当前节点" name="current_node">
+            <a-input v-model:value="formData.current_node" placeholder="请输入当前节点" />
+          </a-form-item>
+          <a-form-item label="任务计划进度" name="plan_progress">
+            <a-slider v-model:value="formData.plan_progress" :min="0" :max="100" :marks="{ 0: '0%', 50: '50%', 100: '100%' }" />
+          </a-form-item>
+          <a-form-item label="原因分析" name="reason_analysis">
+            <a-textarea v-model:value="formData.reason_analysis" :rows="3" placeholder="请输入偏差或问题原因分析" />
+          </a-form-item>
+          <a-form-item label="所需支持" name="required_support">
+            <a-textarea v-model:value="formData.required_support" :rows="3" placeholder="请输入完成任务所需的资源或协调支持" />
+          </a-form-item>
+        </template>
+        <a-form-item v-if="!isAutomationFormProject && !formData.id" label="直接创建三级任务">
+          <a-switch v-model:checked="directLevel3Create" />
+          <span style="margin-left: 10px; color: #888">开启后选择二级分类，直接创建具体执行任务</span>
+        </a-form-item>
+        <a-form-item v-if="!isAutomationFormProject" :label="directLevel3Create && !formData.id ? '所属二级分类' : '父任务'" name="parent_id">
           <a-select
             v-model:value="formData.parent_id"
-            placeholder="不选择则创建一级任务"
+            :placeholder="directLevel3Create && !formData.id ? '请选择二级分类' : '不选择则创建一级任务'"
             allow-clear
             show-search
             :filter-option="filterTaskOption"
             :disabled="!formData.project_id"
           >
             <a-select-option
-              v-for="task in availableTasks.filter(item => (item.level || 1) < 3)"
+              v-for="task in availableTasks.filter(item => directLevel3Create && !formData.id ? item.level === 2 : (item.level || 1) < 3)"
               :key="task.id"
               :value="task.id"
             >
@@ -277,12 +365,13 @@
           </a-select>
         </a-form-item>
         <a-alert
+          v-if="!isAutomationFormProject"
           :message="formTaskLevel === 3 ? '当前将创建具体执行任务，会进入甘特图' : `当前将创建${formTaskLevel === 1 ? '一级' : '二级'}任务分类，不进入甘特图`"
           :type="formTaskLevel === 3 ? 'success' : 'info'"
           show-icon
           style="margin-bottom: 16px"
         />
-        <a-form-item label="关联需求" name="requirement_id">
+        <a-form-item v-if="!isAutomationFormProject" label="关联需求" name="requirement_id">
           <a-select
             v-model:value="formData.requirement_id"
             placeholder="选择需求（可选）"
@@ -301,7 +390,7 @@
             </a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="状态" name="status">
+        <a-form-item v-if="!isAutomationFormProject" label="状态" name="status">
           <a-select v-model:value="formData.status">
             <a-select-option value="wait">未开始</a-select-option>
             <a-select-option value="doing">进行中</a-select-option>
@@ -311,7 +400,7 @@
             <a-select-option value="closed">已延期</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="优先级" name="priority">
+        <a-form-item v-if="!isAutomationFormProject" label="优先级" name="priority">
           <a-select v-model:value="formData.priority">
             <a-select-option value="low">低</a-select-option>
             <a-select-option value="medium">中</a-select-option>
@@ -319,22 +408,27 @@
             <a-select-option value="urgent">紧急</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="负责人" name="assignee_id">
-          <a-select
-            v-model:value="formData.assignee_id"
-            placeholder="选择负责人（可选）"
-            allow-clear
-            show-search
-            :filter-option="filterUserOption"
-          >
-            <a-select-option
-              v-for="user in users"
-              :key="user.id"
-              :value="user.id"
-            >
-              {{ user.username }}{{ user.nickname ? `(${user.nickname})` : '' }}
+        <a-form-item v-if="isSmartWarehouseFormProject" label="负责人（乙方）" name="external_contact_id">
+          <a-select v-model:value="formData.external_contact_id" placeholder="从乙方联系人目录选择" allow-clear show-search :filter-option="filterExternalContact">
+            <a-select-option v-for="contact in externalContacts.filter(item => item.enabled)" :key="contact.id" :value="contact.id">
+              {{ contact.name }}{{ contact.company ? `（${contact.company}）` : '' }}
             </a-select-option>
           </a-select>
+          <div class="form-help">外部人员无需系统账号；请先在“Excel 收发中心”维护姓名和邮箱</div>
+        </a-form-item>
+        <a-form-item v-if="!isAutomationFormProject" label="对口人（甲方）" name="counterpart_name">
+          <a-select
+            v-model:value="formData.counterpart_id"
+            placeholder="请选择系统用户"
+            allow-clear
+            show-search
+            :filter-option="filterCounterpartOption"
+          >
+            <a-select-option v-for="user in users" :key="user.id" :value="user.id">
+              {{ formatUserName(user) }}
+            </a-select-option>
+          </a-select>
+          <div class="form-help">对口人必须是系统用户，负责审核任务时间变更</div>
         </a-form-item>
         <a-form-item label="开始日期" name="start_date">
           <a-date-picker
@@ -352,15 +446,7 @@
             format="YYYY-MM-DD"
           />
         </a-form-item>
-        <a-form-item label="截止日期" name="due_date">
-          <a-date-picker
-            v-model:value="formData.due_date"
-            placeholder="选择截止日期"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
-        </a-form-item>
-        <a-form-item label="进度" name="progress">
+        <a-form-item v-if="!isAutomationFormProject" label="进度" name="progress">
           <a-slider
             v-model:value="formData.progress"
             :min="0"
@@ -369,35 +455,15 @@
           />
           <span style="margin-left: 8px">{{ formData.progress }}%</span>
         </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
-          <a-input-number
-            v-model:value="formData.estimated_hours"
-            placeholder="预估工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
+        <a-form-item v-if="!isAutomationFormProject" label="计划天数 / 预估工时">
+          <a-input :value="`${formPlannedDays} 天 / ${formEstimatedHours} 小时`" disabled />
+          <div class="form-help">按开始、结束日期（含首尾）自动计算，每天 8 小时</div>
         </a-form-item>
-        <a-form-item label="实际工时" name="actual_hours">
-          <a-input-number
-            v-model:value="formData.actual_hours"
-            placeholder="实际工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-          <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配</span>
+        <a-form-item v-if="!isAutomationFormProject" label="实际天数 / 实际工时">
+          <a-input :value="`${formActualDays} 天 / ${formActualHours} 小时`" disabled />
+          <div class="form-help">从开始日期到今天（含开始当天）自动计算，尚未开始为 0</div>
         </a-form-item>
-        <a-form-item label="工作日期" name="work_date" v-if="formData.actual_hours">
-          <a-date-picker
-            v-model:value="formData.work_date"
-            placeholder="选择工作日期（可选）"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
-          <span style="margin-left: 8px; color: #999">不填则使用任务开始日期或今天</span>
-        </a-form-item>
-        <a-form-item label="附件">
+        <a-form-item v-if="!isAutomationFormProject" label="附件">
           <AttachmentUpload
             v-if="formData.project_id && formData.project_id > 0"
             :project-id="formData.project_id"
@@ -406,7 +472,7 @@
           />
           <span v-else style="color: #999;">请先选择项目后再上传附件</span>
         </a-form-item>
-        <a-form-item label="依赖任务" name="dependency_ids">
+        <a-form-item v-if="!isAutomationFormProject" label="依赖任务" name="dependency_ids">
           <a-select
             v-model:value="formData.dependency_ids"
             mode="multiple"
@@ -450,37 +516,8 @@
             :min="0"
             :max="100"
             :marks="{ 0: '0%', 50: '50%', 100: '100%' }"
-            :disabled="autoProgress"
           />
           <span style="margin-left: 8px">{{ progressFormData.progress || 0 }}%</span>
-          <span v-if="autoProgress" style="margin-left: 8px; color: #999">（根据工时自动计算）</span>
-        </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
-          <a-input-number
-            v-model:value="progressFormData.estimated_hours"
-            placeholder="预估工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-        </a-form-item>
-        <a-form-item label="实际工时" name="actual_hours">
-          <a-input-number
-            v-model:value="progressFormData.actual_hours"
-            placeholder="实际工时（小时）"
-            :min="0"
-            :precision="2"
-            style="width: 100%"
-          />
-          <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配并计算进度</span>
-        </a-form-item>
-        <a-form-item label="工作日期" name="work_date" v-if="progressFormData.actual_hours">
-          <a-date-picker
-            v-model:value="progressFormData.work_date"
-            placeholder="选择工作日期（默认今天）"
-            style="width: 100%"
-            format="YYYY-MM-DD"
-          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -500,8 +537,8 @@
           <div style="margin-bottom: 16px; text-align: right">
             <a-space>
               <a-button @click="handleDetailEdit">编辑</a-button>
-              <a-button @click="handleDetailUpdateProgress">更新进度</a-button>
-              <a-dropdown>
+              <a-button v-if="detailTask.project?.project_type !== 'automation'" @click="handleDetailUpdateProgress">更新进度</a-button>
+              <a-dropdown v-if="detailTask.project?.project_type !== 'automation'">
                 <a-button>
                   状态 <DownOutlined />
                 </a-button>
@@ -545,8 +582,11 @@
               <a-descriptions-item label="项目">
                 {{ detailTask.project?.name || '-' }}
               </a-descriptions-item>
-              <a-descriptions-item label="负责人">
-                {{ detailTask.assignee ? `${detailTask.assignee.username}${detailTask.assignee.nickname ? `(${detailTask.assignee.nickname})` : ''}` : '-' }}
+              <a-descriptions-item label="负责人（乙方）">
+                {{ getAssigneeName(detailTask) }}
+              </a-descriptions-item>
+              <a-descriptions-item label="对口人（甲方）">
+                {{ getCounterpartName(detailTask) }}
               </a-descriptions-item>
               <a-descriptions-item label="开始日期">
                 {{ detailTask.start_date || '-' }}
@@ -554,10 +594,11 @@
               <a-descriptions-item label="结束日期">
                 {{ detailTask.end_date || '-' }}
               </a-descriptions-item>
-              <a-descriptions-item label="截止日期">
-                <span :style="{ color: isOverdue(detailTask.due_date, detailTask.status) ? 'red' : '' }">
-                  {{ detailTask.due_date || '-' }}
-                </span>
+              <a-descriptions-item v-if="detailTask.project?.project_type !== 'automation'" label="计划天数 / 预估工时">
+                {{ detailTask.planned_days || 0 }} 天 / {{ detailTask.estimated_hours || 0 }} 小时
+              </a-descriptions-item>
+              <a-descriptions-item v-if="detailTask.project?.project_type !== 'automation'" label="实际天数 / 实际工时">
+                {{ detailTask.actual_days || 0 }} 天 / {{ detailTask.actual_hours || 0 }} 小时
               </a-descriptions-item>
               <a-descriptions-item label="创建人">
                 {{ detailTask.creator ? `${detailTask.creator.username}${detailTask.creator.nickname ? `(${detailTask.creator.nickname})` : ''}` : '-' }}
@@ -700,6 +741,12 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <TaskDispatchCenter
+      v-if="searchForm.project_id"
+      v-model:open="dispatchCenterVisible"
+      :project-id="searchForm.project_id"
+      @contacts-changed="externalContacts = $event"
+    />
   </div>
 </template>
 
@@ -707,13 +754,14 @@
 import { ref, reactive, onMounted, watch, nextTick, computed } from 'vue'
 import { saveLastSelected, getLastSelected } from '@/utils/storage'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
-import { PlusOutlined, DownOutlined, UpOutlined } from '@ant-design/icons-vue'
+import { message, Modal } from 'ant-design-vue'
+import { PlusOutlined, DownOutlined, UpOutlined, RightOutlined, FilterOutlined, SettingOutlined } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { formatDateTime, formatDate } from '@/utils/date'
 import AppHeader from '@/components/AppHeader.vue'
 import MarkdownEditor from '@/components/MarkdownEditor.vue'
 import AttachmentUpload from '@/components/AttachmentUpload.vue'
+import TaskDispatchCenter from '@/components/TaskDispatchCenter.vue'
 import {
   getTasks,
   getTask,
@@ -727,8 +775,10 @@ import {
   type Task,
   type CreateTaskRequest,
   type UpdateTaskProgressRequest,
-  type Action
+  type Action,
+  type ExternalTaskContact
 } from '@/api/task'
+import { getTaskContacts } from '@/api/taskDispatch'
 import { getProjects, type Project } from '@/api/project'
 import { getRequirements, type Requirement } from '@/api/requirement'
 import { getUsers, type User } from '@/api/user'
@@ -741,11 +791,15 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const tasks = ref<Task[]>([])
 const showGroupNodes = ref(false)
+const showHistoricalCompleted = ref(false)
+const directLevel3Create = ref(true)
 const projects = ref<Project[]>([])
 const requirements = ref<Requirement[]>([])
 const users = ref<User[]>([])
 const availableTasks = ref<Task[]>([])
 const taskLoading = ref(false)
+const dispatchCenterVisible = ref(false)
+const externalContacts = ref<ExternalTaskContact[]>([])
 const searchFormVisible = ref(false) // 搜索栏显示/隐藏状态，默认折叠
 
 // 详情弹窗相关
@@ -775,7 +829,7 @@ const searchForm = reactive({
 
 const pagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: 30,
   total: 0,
   showTotal: (total: number) => `共 ${total} 条`,
   showSizeChanger: true,
@@ -784,24 +838,104 @@ const pagination = reactive({
 
 // 计算表格滚动高度
 const tableScrollHeight = computed(() => {
-  return 'max(320px, calc(100vh - 420px))'
+  return 'calc(100vh - 280px)'
 })
 
-const columns = [
-  { title: '一级任务', key: 'level1', width: 180, ellipsis: true },
-  { title: '二级任务', key: 'level2', width: 200, ellipsis: true },
-  { title: '具体任务', key: 'specific', width: 240, ellipsis: true },
+const baseColumns = [
+  { title: '一级任务', key: 'level1', width: 160, ellipsis: true },
+  { title: '二级任务', key: 'level2', width: 180, ellipsis: true },
+  { title: '具体任务', key: 'specific', width: 220, ellipsis: true },
   { title: '项目', key: 'project', width: 120 },
   { title: '需求', key: 'requirement', width: 150 },
-  { title: '状态', key: 'status', width: 100 },
+  { title: '状态', key: 'status', width: 90 },
   { title: '优先级', key: 'priority', width: 100 },
-  { title: '负责人', key: 'assignee', width: 150 },
-  { title: '进度', key: 'progress', width: 150 },
+  { title: '负责人（乙方）', key: 'assignee', width: 140, ellipsis: true },
+  { title: '对口人（甲方）', key: 'counterpart', width: 140, ellipsis: true },
+  { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
-  { title: '日期', key: 'dates', width: 200 },
+  { title: '日期', key: 'dates', width: 210 },
+  { title: '每日进展说明', key: 'latest_update', width: 240, ellipsis: true },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
-  { title: '操作', key: 'action', width: 300, fixed: 'right' as const }
+  { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
+
+const automationColumns = [
+  { title: '任务序号', key: 'task_sequence', width: 100, fixed: 'left' as const },
+  { title: '任务名称', key: 'automation_title', width: 220, ellipsis: true },
+  { title: '任务开始时间', key: 'automation_start', width: 130 },
+  { title: '任务结束时间', key: 'automation_end', width: 130 },
+  { title: '重要里程碑1', key: 'milestone1', width: 180, ellipsis: true },
+  { title: '重要里程碑2', key: 'milestone2', width: 180, ellipsis: true },
+  { title: '重要里程碑3', key: 'milestone3', width: 180, ellipsis: true },
+  { title: '当前节点', key: 'current_node', width: 180, ellipsis: true },
+  { title: '任务计划进度', key: 'plan_progress', width: 150 },
+  { title: '原因分析', key: 'reason_analysis', width: 220, ellipsis: true },
+  { title: '所需支持', key: 'required_support', width: 220, ellipsis: true },
+  { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
+]
+
+const selectedSearchProject = computed(() => projects.value.find(project => project.id === searchForm.project_id))
+const isAutomationTaskView = computed(() => selectedSearchProject.value?.project_type === 'automation')
+const isSmartWarehouseTaskView = computed(() => selectedSearchProject.value?.project_type === 'smart_warehouse')
+
+const defaultVisibleColumnKeys = ['level1', 'level2', 'specific', 'status', 'assignee', 'counterpart', 'progress', 'dates', 'latest_update']
+const savedVisibleColumns = localStorage.getItem('task_visible_columns')
+const restoreVisibleColumns = () => {
+  try {
+    const keys = savedVisibleColumns ? JSON.parse(savedVisibleColumns) : null
+    if (Array.isArray(keys)) {
+      return keys.includes('latest_update') ? keys : [...keys, 'latest_update']
+    }
+    return [...defaultVisibleColumnKeys]
+  } catch {
+    return [...defaultVisibleColumnKeys]
+  }
+}
+const visibleColumnKeys = ref<string[]>(restoreVisibleColumns())
+const configurableColumns = baseColumns.filter(column => column.key !== 'action')
+const columns = computed(() => isAutomationTaskView.value
+  ? automationColumns
+  : baseColumns.filter(column => column.key === 'action' || visibleColumnKeys.value.includes(column.key)))
+
+watch(visibleColumnKeys, keys => {
+  localStorage.setItem('task_visible_columns', JSON.stringify(keys))
+}, { deep: true })
+
+const resetVisibleColumns = () => {
+  visibleColumnKeys.value = [...defaultVisibleColumnKeys]
+}
+
+const collapsedGroupIds = ref<Set<number>>(new Set())
+const allGroupsCollapsed = computed(() => {
+  const groups = tasks.value.filter(task => task.node_type === 'group' && (task.level || 1) < 3)
+  return groups.length > 0 && groups.every(task => collapsedGroupIds.value.has(task.id))
+})
+
+const visibleTasks = computed(() => tasks.value.filter(task => {
+  if (!showGroupNodes.value) return true
+  let parent = task.parent
+  while (parent) {
+    if (collapsedGroupIds.value.has(parent.id)) return false
+    parent = parent.parent
+  }
+  return true
+}))
+
+const toggleGroup = (id: number) => {
+  const next = new Set(collapsedGroupIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  collapsedGroupIds.value = next
+}
+
+const toggleAllGroups = () => {
+  if (allGroupsCollapsed.value) {
+    collapsedGroupIds.value = new Set()
+    return
+  }
+  collapsedGroupIds.value = new Set(
+    tasks.value.filter(task => task.node_type === 'group' && (task.level || 1) < 3).map(task => task.id)
+  )
+}
 
 const getLevelTitle = (task: Task, level: number) => {
   if ((task.level || 1) === level && task.node_type === 'group') return task.title
@@ -812,6 +946,18 @@ const getLevelTitle = (task: Task, level: number) => {
   }
   return '-'
 }
+
+const getTaskDateRange = (task: Task) => {
+  const start = task.start_date ? formatDate(task.start_date) : '-'
+  const finishDate = task.end_date
+  const finish = finishDate ? formatDate(finishDate) : '-'
+  return `${start} → ${finish}`
+}
+
+const getTaskDateTooltip = (task: Task) => [
+  task.start_date ? `开始：${formatDate(task.start_date)}` : null,
+  task.end_date ? `结束：${formatDate(task.end_date)}` : null
+].filter(Boolean).join('；') || '未设置日期'
 
 const modalVisible = ref(false)
 const modalTitle = ref('新增任务')
@@ -826,6 +972,10 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   parent_id: undefined,
   requirement_id: undefined,
   assignee_id: undefined,
+  assignee_name: '',
+  counterpart_id: undefined,
+  counterpart_name: '',
+  external_contact_id: undefined,
   start_date: undefined,
   end_date: undefined,
   due_date: undefined,
@@ -834,8 +984,57 @@ const formData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' | 'd
   actual_hours: undefined,
   work_date: undefined,
   dependency_ids: [],
+  task_sequence: '',
+  milestone1: '',
+  milestone2: '',
+  milestone3: '',
+  current_node: '',
+  plan_progress: 0,
+  reason_analysis: '',
+  required_support: '',
   attachment_ids: [] as number[]
 })
+
+const isAutomationFormProject = computed(() =>
+  projects.value.find(project => project.id === formData.project_id)?.project_type === 'automation'
+)
+const isSmartWarehouseFormProject = computed(() =>
+  projects.value.find(project => project.id === formData.project_id)?.project_type === 'smart_warehouse'
+)
+
+const formatUserName = (user: User) => `${user.username}${user.nickname ? `(${user.nickname})` : ''}`
+const filterCounterpartOption = (input: string, option: any) => {
+  const user = users.value.find(item => item.id === option.value)
+  return !!user && formatUserName(user).toLowerCase().includes(input.toLowerCase())
+}
+const filterExternalContact = (input: string, option: any) => {
+  const contact = externalContacts.value.find(item => item.id === option.value)
+  return !!contact && `${contact.name} ${contact.company || ''} ${contact.email}`.toLowerCase().includes(input.toLowerCase())
+}
+const loadExternalContacts = async () => {
+  if (!isSmartWarehouseFormProject.value || !formData.project_id) {
+    externalContacts.value = []
+    return
+  }
+  externalContacts.value = await getTaskContacts(formData.project_id)
+}
+const getAssigneeName = (task: Task) => task.assignee
+  ? `${task.assignee.username}${task.assignee.nickname ? `(${task.assignee.nickname})` : ''}`
+  : task.assignee_name || '-'
+const getCounterpartName = (task: Task) => task.counterpart
+  ? `${task.counterpart.username}${task.counterpart.nickname ? `(${task.counterpart.nickname})` : ''}`
+  : task.counterpart_name || '-'
+
+const formPlannedDays = computed(() => {
+  if (!formData.start_date || !formData.end_date || formData.end_date.isBefore(formData.start_date, 'day')) return 0
+  return formData.end_date.startOf('day').diff(formData.start_date.startOf('day'), 'day') + 1
+})
+const formActualDays = computed(() => {
+  if (!formData.start_date || dayjs().startOf('day').isBefore(formData.start_date.startOf('day'))) return 0
+  return dayjs().startOf('day').diff(formData.start_date.startOf('day'), 'day') + 1
+})
+const formEstimatedHours = computed(() => formPlannedDays.value * 8)
+const formActualHours = computed(() => formActualDays.value * 8)
 
 const formTaskLevel = computed(() => {
   if (!formData.parent_id) return 1
@@ -855,38 +1054,14 @@ const progressFormRef = ref()
 const progressFormData = reactive<{
   task_id: number
   progress?: number
-  estimated_hours?: number
-  actual_hours?: number
-  work_date?: Dayjs
 }>({
   task_id: 0,
-  progress: undefined,
-  estimated_hours: undefined,
-  actual_hours: undefined,
-  work_date: undefined
+  progress: undefined
 })
 
 const progressFormRules = {
-  // progress不再是必填项，因为可以通过工时自动计算
+  // 进度可单独维护，工时由日期自动计算。
 }
-
-// 自动计算进度（实际工时/预估工时 * 100）
-const autoProgress = computed(() => {
-  if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
-    const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
-    progressFormData.progress = progress
-    return true
-  }
-  return false
-})
-
-// 监听实际工时和预估工时的变化，自动计算进度
-watch([() => progressFormData.actual_hours, () => progressFormData.estimated_hours], () => {
-  if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
-    const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
-    progressFormData.progress = progress
-  }
-})
 
 // 加载任务列表
 const loadTasks = async () => {
@@ -913,6 +1088,9 @@ const loadTasks = async () => {
     }
     if (!showGroupNodes.value) {
       params.node_type = 'task'
+    }
+    if (isSmartWarehouseTaskView.value && !showHistoricalCompleted.value) {
+      params.hide_historical_completed = true
     }
     const response = await getTasks(params)
     tasks.value = response.list
@@ -1022,7 +1200,9 @@ const handleFormProjectChange = (value: number | undefined) => {
   // 原有的 handleProjectChange 逻辑
   formData.requirement_id = undefined
   formData.parent_id = undefined
+  formData.external_contact_id = undefined
   loadRequirementsForProject()
+  loadExternalContacts()
 }
 
 // 重置
@@ -1049,6 +1229,7 @@ const handleTableChange = (pag: any) => {
 const handleCreate = () => {
   modalTitle.value = '新增任务'
   formData.id = undefined
+  directLevel3Create.value = true
   formData.title = ''
   formData.description = ''
   formData.status = 'wait'
@@ -1064,10 +1245,22 @@ const handleCreate = () => {
   }
   formData.requirement_id = undefined
   formData.assignee_id = undefined
+  formData.assignee_name = ''
+  formData.counterpart_id = undefined
+  formData.counterpart_name = ''
+  formData.external_contact_id = undefined
   formData.start_date = undefined
   formData.end_date = undefined
   formData.due_date = undefined
   formData.progress = 0
+  formData.task_sequence = ''
+  formData.milestone1 = ''
+  formData.milestone2 = ''
+  formData.milestone3 = ''
+  formData.current_node = ''
+  formData.plan_progress = 0
+  formData.reason_analysis = ''
+  formData.required_support = ''
   formData.attachment_ids = []
   taskAttachments.value = []
   formData.estimated_hours = undefined
@@ -1080,6 +1273,11 @@ const handleCreate = () => {
 }
 
 const handleGroupModeChange = () => {
+  pagination.current = 1
+  loadTasks()
+}
+
+const handleHistoricalCompletedChange = () => {
   pagination.current = 1
   loadTasks()
 }
@@ -1103,6 +1301,11 @@ const handleEdit = async (record: Task) => {
   formData.parent_id = record.parent_id
   formData.requirement_id = record.requirement_id
   formData.assignee_id = record.assignee_id
+  formData.assignee_name = record.assignee ? formatUserName(record.assignee) : (record.assignee_name || '')
+  formData.counterpart_id = record.counterpart_id
+  formData.counterpart_name = record.counterpart ? formatUserName(record.counterpart) : (record.counterpart_name || '')
+  formData.external_contact_id = record.external_contact_id
+  await loadExternalContacts()
   // 解析日期，确保日期有效
   if (record.start_date) {
     const startDate = dayjs(record.start_date)
@@ -1133,6 +1336,14 @@ const handleEdit = async (record: Task) => {
     formData.due_date = undefined
   }
   formData.progress = record.progress
+  formData.task_sequence = record.task_sequence || ''
+  formData.milestone1 = record.milestone1 || ''
+  formData.milestone2 = record.milestone2 || ''
+  formData.milestone3 = record.milestone3 || ''
+  formData.current_node = record.current_node || ''
+  formData.plan_progress = record.plan_progress || 0
+  formData.reason_analysis = record.reason_analysis || ''
+  formData.required_support = record.required_support || ''
   formData.estimated_hours = record.estimated_hours
   formData.actual_hours = record.actual_hours
   formData.work_date = undefined
@@ -1158,6 +1369,13 @@ const handleSubmit = async () => {
       message.error('请选择项目')
       return
     }
+    if (!isAutomationFormProject.value && directLevel3Create.value && !formData.id) {
+      const parent = availableTasks.value.find(task => task.id === formData.parent_id)
+      if (!parent || parent.level !== 2) {
+        message.error('直接创建三级任务时，请选择所属二级分类')
+        return
+      }
+    }
     
     // 上传Markdown编辑器中的本地图片
     let description = formData.description || ''
@@ -1182,15 +1400,23 @@ const handleSubmit = async () => {
       // 编辑时用 0 明确表示清除父任务；创建时不选父任务则省略该字段
       parent_id: formData.id ? (formData.parent_id || 0) : formData.parent_id,
       requirement_id: formData.requirement_id,
-      assignee_id: formData.assignee_id,
+      assignee_id: formData.id ? (formData.assignee_id || 0) : formData.assignee_id,
+      assignee_name: formData.assignee_id ? '' : (formData.assignee_name || ''),
+      counterpart_id: formData.id ? (formData.counterpart_id || 0) : formData.counterpart_id,
+      counterpart_name: '',
+      external_contact_id: formData.id ? (formData.external_contact_id || 0) : formData.external_contact_id,
       start_date: formData.start_date && formData.start_date.isValid() ? formData.start_date.format('YYYY-MM-DD') : undefined,
       end_date: formData.end_date && formData.end_date.isValid() ? formData.end_date.format('YYYY-MM-DD') : undefined,
-      due_date: formData.due_date && formData.due_date.isValid() ? formData.due_date.format('YYYY-MM-DD') : undefined,
       progress: formData.progress,
-      estimated_hours: formData.estimated_hours,
-      actual_hours: formData.actual_hours,
-      work_date: formData.work_date && formData.work_date.isValid() ? formData.work_date.format('YYYY-MM-DD') : undefined,
-      dependency_ids: formData.dependency_ids
+      dependency_ids: formData.dependency_ids,
+      task_sequence: formData.task_sequence,
+      milestone1: formData.milestone1,
+      milestone2: formData.milestone2,
+      milestone3: formData.milestone3,
+      current_node: formData.current_node,
+      plan_progress: formData.plan_progress,
+      reason_analysis: formData.reason_analysis,
+      required_support: formData.required_support
     }
     let taskId: number
     if (formData.id) {
@@ -1251,13 +1477,29 @@ const handleStatusChange = async (id: number, status: string) => {
   }
 }
 
+const handleActionMenu = (record: Task, key: string) => {
+  if (key === 'add-child') {
+    handleCreateChild(record)
+  } else if (key === 'progress') {
+    handleUpdateProgress(record)
+  } else if (key.startsWith('status:')) {
+    handleStatusChange(record.id, key.slice(7))
+  } else if (key === 'delete') {
+    Modal.confirm({
+      title: '删除任务',
+      content: `确定要删除“${record.title}”吗？`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => handleDelete(record.id)
+    })
+  }
+}
+
 // 更新进度
 const handleUpdateProgress = (record: Task) => {
   progressFormData.task_id = record.id
   progressFormData.progress = record.progress
-  progressFormData.estimated_hours = record.estimated_hours
-  progressFormData.actual_hours = record.actual_hours // 显示当前实际工时
-  progressFormData.work_date = dayjs() // 默认今天
   progressModalVisible.value = true
 }
 
@@ -1266,10 +1508,7 @@ const handleProgressSubmit = async () => {
   try {
     await progressFormRef.value.validate()
     const data: UpdateTaskProgressRequest = {
-      progress: progressFormData.progress,
-      estimated_hours: progressFormData.estimated_hours,
-      actual_hours: progressFormData.actual_hours,
-      work_date: progressFormData.work_date && progressFormData.work_date.isValid() ? progressFormData.work_date.format('YYYY-MM-DD') : undefined
+      progress: progressFormData.progress
     }
     await updateTaskProgress(progressFormData.task_id, data)
     message.success('进度更新成功')
@@ -1334,16 +1573,6 @@ const getPriorityText = (priority: string) => {
     urgent: '紧急'
   }
   return texts[priority] || priority
-}
-
-// 判断是否逾期
-const isOverdue = (dueDate: string | undefined, status: string | undefined): boolean => {
-  if (!dueDate || status === 'done' || status === 'closed' || status === 'cancel') {
-    return false
-  }
-  const due = dayjs(dueDate)
-  const now = dayjs()
-  return due.isBefore(now, 'day')
 }
 
 // 加载任务详情
@@ -1549,17 +1778,6 @@ const filterTaskOption = (input: string, option: any) => {
   return task.title.toLowerCase().includes(searchText)
 }
 
-// 用户筛选
-const filterUserOption = (input: string, option: any) => {
-  const user = users.value.find(u => u.id === option.value)
-  if (!user) return false
-  const searchText = input.toLowerCase()
-  return (
-    user.username.toLowerCase().includes(searchText) ||
-    (user.nickname && user.nickname.toLowerCase().includes(searchText))
-  )
-}
-
 onMounted(async () => {
   // 先加载项目列表，确保项目选择器有数据
   await loadProjects()
@@ -1627,7 +1845,7 @@ onMounted(async () => {
 }
 
 .content {
-  padding: 24px;
+  padding: 10px 16px;
   background: #f0f2f5;
   flex: 1;
   height: 0;
@@ -1638,7 +1856,7 @@ onMounted(async () => {
 
 .content-inner {
   background: white;
-  padding: 24px;
+  padding: 6px 16px 10px;
   border-radius: 4px;
   max-width: 100%;
   margin: 0 auto;
@@ -1646,17 +1864,61 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   height: 0;
 }
 
-/* 折叠搜索条件时移除空白正文，为任务表格留出更多空间 */
-.search-card-collapsed :deep(.ant-card-body) {
-  display: none;
+.content-inner :deep(.ant-page-header) {
+  padding: 4px 0 8px;
+}
+
+.content-inner :deep(.ant-page-header-heading) {
+  min-height: 40px;
+}
+
+.content-inner :deep(.ant-page-header-heading-title) {
+  font-size: 22px;
+}
+
+.task-toolbar {
+  min-height: 40px;
+  padding: 2px 4px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.search-card {
+  margin-top: 8px;
+}
+
+.search-card :deep(.ant-card-body) {
+  padding: 12px 12px 4px;
+}
+
+.search-card :deep(.ant-form-item) {
+  margin-bottom: 8px;
+}
+
+.column-settings {
+  width: 240px;
+}
+
+.column-settings-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.column-settings :deep(.ant-checkbox-group) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 4px;
 }
 
 .table-card {
-  margin-top: 16px;
+  margin-top: 8px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1669,7 +1931,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px;
+  padding: 4px 8px 2px;
 }
 
 .table-card :deep(.ant-table-wrapper) {
@@ -1705,7 +1967,7 @@ onMounted(async () => {
 
 .table-card :deep(.ant-table-container) {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -1715,8 +1977,48 @@ onMounted(async () => {
   width: 100%;
 }
 
-.table-card {
-  margin-top: 16px;
+.table-card :deep(.ant-table-thead > tr > th) {
+  height: 38px;
+  padding: 6px 12px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.table-card :deep(.ant-table-tbody > tr > td) {
+  height: 38px;
+  max-height: 38px;
+  padding: 3px 12px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.table-card :deep(.ant-table-pagination.ant-pagination) {
+  min-height: 34px;
+  margin: 6px 0 0;
+}
+
+.table-card :deep(.ant-progress-line) {
+  margin-bottom: 0;
+}
+
+.task-date-range {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.task-date-overdue {
+  color: #ff4d4f;
+}
+
+.group-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: -6px;
 }
 /* 详情弹窗样式 */
 .markdown-content {

@@ -58,8 +58,11 @@
                 <a-descriptions-item label="项目">
                   {{ task?.project?.name || '-' }}
                 </a-descriptions-item>
-                <a-descriptions-item label="负责人">
-                  {{ task?.assignee ? `${task.assignee.username}${task.assignee.nickname ? `(${task.assignee.nickname})` : ''}` : '-' }}
+                <a-descriptions-item label="负责人（乙方）">
+                  {{ task ? getAssigneeName(task) : '-' }}
+                </a-descriptions-item>
+                <a-descriptions-item label="对口人（甲方）">
+                  {{ task ? getCounterpartName(task) : '-' }}
                 </a-descriptions-item>
                 <a-descriptions-item label="开始日期">
                   {{ task?.start_date || '-' }}
@@ -67,10 +70,16 @@
                 <a-descriptions-item label="结束日期">
                   {{ task?.end_date || '-' }}
                 </a-descriptions-item>
-                <a-descriptions-item label="截止日期">
+                <a-descriptions-item v-if="!isSmartWarehouse" label="截止日期">
                   <span :style="{ color: isOverdue(task?.due_date, task?.status) ? 'red' : '' }">
                     {{ task?.due_date || '-' }}
                   </span>
+                </a-descriptions-item>
+                <a-descriptions-item v-if="isSmartWarehouse" label="计划天数 / 预估工时">
+                  {{ task?.planned_days || 0 }} 天 / {{ task?.estimated_hours || 0 }} 小时
+                </a-descriptions-item>
+                <a-descriptions-item v-if="isSmartWarehouse" label="实际天数 / 实际工时">
+                  {{ task?.actual_days || 0 }} 天 / {{ task?.actual_hours || 0 }} 小时
                 </a-descriptions-item>
                 <a-descriptions-item label="创建人">
                   {{ task?.creator ? `${task.creator.username}${task.creator.nickname ? `(${task.creator.nickname})` : ''}` : '-' }}
@@ -216,7 +225,7 @@
           <span style="margin-left: 8px">{{ progressFormData.progress || 0 }}%</span>
           <span v-if="autoProgress" style="margin-left: 8px; color: #999">（根据工时自动计算）</span>
         </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
+        <a-form-item v-if="!isSmartWarehouse" label="预估工时" name="estimated_hours">
           <a-input-number
             v-model:value="progressFormData.estimated_hours"
             placeholder="预估工时（小时）"
@@ -225,7 +234,7 @@
             style="width: 100%"
           />
         </a-form-item>
-        <a-form-item label="实际工时" name="actual_hours">
+        <a-form-item v-if="!isSmartWarehouse" label="实际工时" name="actual_hours">
           <a-input-number
             v-model:value="progressFormData.actual_hours"
             placeholder="实际工时（小时）"
@@ -235,7 +244,7 @@
           />
           <span style="margin-left: 8px; color: #999">更新实际工时会自动创建资源分配并计算进度</span>
         </a-form-item>
-        <a-form-item label="工作日期" name="work_date" v-if="progressFormData.actual_hours">
+        <a-form-item label="工作日期" name="work_date" v-if="!isSmartWarehouse && progressFormData.actual_hours">
           <a-date-picker
             v-model:value="progressFormData.work_date"
             placeholder="选择工作日期（默认今天）"
@@ -327,21 +336,24 @@
             <a-select-option value="urgent">紧急</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="负责人" name="assignee_id">
+        <a-form-item label="负责人（乙方）" name="assignee_name">
+          <a-auto-complete
+            v-model:value="editFormData.assignee_name"
+            :options="userNameOptions"
+            placeholder="输入姓名或选择系统用户"
+            allow-clear
+            @change="handleAssigneeNameChange"
+            @select="(_value: string, option: any) => editFormData.assignee_id = option.userId"
+          />
+        </a-form-item>
+        <a-form-item label="对口人（甲方）" name="counterpart_name">
           <a-select
-            v-model:value="editFormData.assignee_id"
-            placeholder="选择负责人（可选）"
+            v-model:value="editFormData.counterpart_id"
+            placeholder="请选择系统用户"
             allow-clear
             show-search
-            :filter-option="filterUserOption"
           >
-            <a-select-option
-              v-for="user in users"
-              :key="user.id"
-              :value="user.id"
-            >
-              {{ user.username }}{{ user.nickname ? `(${user.nickname})` : '' }}
-            </a-select-option>
+            <a-select-option v-for="user in users" :key="user.id" :value="user.id">{{ formatUserName(user) }}</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="开始日期" name="start_date">
@@ -360,7 +372,7 @@
             format="YYYY-MM-DD"
           />
         </a-form-item>
-        <a-form-item label="截止日期" name="due_date">
+        <a-form-item v-if="!isSmartWarehouse" label="截止日期" name="due_date">
           <a-date-picker
             v-model:value="editFormData.due_date"
             placeholder="选择截止日期（可选）"
@@ -377,7 +389,7 @@
           />
           <span style="margin-left: 8px">{{ editFormData.progress || 0 }}%</span>
         </a-form-item>
-        <a-form-item label="预估工时" name="estimated_hours">
+        <a-form-item v-if="!isSmartWarehouse" label="预估工时" name="estimated_hours">
           <a-input-number
             v-model:value="editFormData.estimated_hours"
             placeholder="预估工时（小时）"
@@ -481,6 +493,9 @@ const editFormData = reactive<Omit<CreateTaskRequest, 'start_date' | 'end_date' 
   project_id: 0,
   requirement_id: undefined,
   assignee_id: undefined,
+  assignee_name: '',
+  counterpart_id: undefined,
+  counterpart_name: '',
   start_date: undefined,
   end_date: undefined,
   due_date: undefined,
@@ -509,8 +524,17 @@ const progressFormRules = {
   // progress不再是必填项，因为可以通过工时自动计算
 }
 
+const isSmartWarehouse = computed(() => task.value?.project?.project_type === 'smart_warehouse')
+const formatUserName = (user: User) => `${user.username}${user.nickname ? `(${user.nickname})` : ''}`
+const userNameOptions = computed(() => users.value.map(user => ({ value: formatUserName(user), label: formatUserName(user), userId: user.id })))
+const findUserByDisplayName = (value?: string) => users.value.find(user => formatUserName(user) === value)
+const handleAssigneeNameChange = (value: string) => { editFormData.assignee_id = findUserByDisplayName(value)?.id }
+const getAssigneeName = (item: Task) => item.assignee ? formatUserName(item.assignee) : item.assignee_name || '-'
+const getCounterpartName = (item: Task) => item.counterpart ? formatUserName(item.counterpart) : item.counterpart_name || '-'
+
 // 自动计算进度（实际工时/预估工时 * 100）
 const autoProgress = computed(() => {
+  if (isSmartWarehouse.value) return false
   if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
     const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
     progressFormData.progress = progress
@@ -521,7 +545,7 @@ const autoProgress = computed(() => {
 
 // 监听实际工时和预估工时的变化，自动计算进度
 watch([() => progressFormData.actual_hours, () => progressFormData.estimated_hours], () => {
-  if (progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
+  if (!isSmartWarehouse.value && progressFormData.estimated_hours && progressFormData.estimated_hours > 0 && progressFormData.actual_hours) {
     const progress = Math.min(100, Math.max(0, Math.round((progressFormData.actual_hours / progressFormData.estimated_hours) * 100)))
     progressFormData.progress = progress
   }
@@ -575,6 +599,9 @@ const handleEdit = async () => {
   editFormData.project_id = task.value.project_id
   editFormData.requirement_id = task.value.requirement_id
   editFormData.assignee_id = task.value.assignee_id
+  editFormData.assignee_name = task.value.assignee ? formatUserName(task.value.assignee) : (task.value.assignee_name || '')
+  editFormData.counterpart_id = task.value.counterpart_id
+  editFormData.counterpart_name = task.value.counterpart ? formatUserName(task.value.counterpart) : (task.value.counterpart_name || '')
   editFormData.start_date = task.value.start_date ? dayjs(task.value.start_date) : undefined
   editFormData.end_date = task.value.end_date ? dayjs(task.value.end_date) : undefined
   editFormData.due_date = task.value.due_date ? dayjs(task.value.due_date) : undefined
@@ -626,12 +653,15 @@ const handleEditSubmit = async () => {
       status: editFormData.status,
       priority: editFormData.priority,
       requirement_id: editFormData.requirement_id,
-      assignee_id: editFormData.assignee_id,
+      assignee_id: editFormData.assignee_id || 0,
+      assignee_name: editFormData.assignee_id ? '' : (editFormData.assignee_name || ''),
+      counterpart_id: editFormData.counterpart_id || 0,
+      counterpart_name: '',
       start_date: editFormData.start_date && typeof editFormData.start_date !== 'string' && 'isValid' in editFormData.start_date && (editFormData.start_date as Dayjs).isValid() ? (editFormData.start_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.start_date === 'string' ? editFormData.start_date : undefined),
       end_date: editFormData.end_date && typeof editFormData.end_date !== 'string' && 'isValid' in editFormData.end_date && (editFormData.end_date as Dayjs).isValid() ? (editFormData.end_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.end_date === 'string' ? editFormData.end_date : undefined),
-      due_date: editFormData.due_date && typeof editFormData.due_date !== 'string' && 'isValid' in editFormData.due_date && (editFormData.due_date as Dayjs).isValid() ? (editFormData.due_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.due_date === 'string' ? editFormData.due_date : undefined),
+      due_date: isSmartWarehouse.value ? undefined : (editFormData.due_date && typeof editFormData.due_date !== 'string' && 'isValid' in editFormData.due_date && (editFormData.due_date as Dayjs).isValid() ? (editFormData.due_date as Dayjs).format('YYYY-MM-DD') : (typeof editFormData.due_date === 'string' ? editFormData.due_date : undefined)),
       progress: editFormData.progress,
-      estimated_hours: editFormData.estimated_hours,
+      estimated_hours: isSmartWarehouse.value ? undefined : editFormData.estimated_hours,
       dependency_ids: editFormData.dependency_ids
     }
     
@@ -775,11 +805,6 @@ const filterProjectOption = (input: string, option: any) => {
 
 // 需求筛选
 const filterRequirementOption = (input: string, option: any) => {
-  return option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-}
-
-// 用户筛选
-const filterUserOption = (input: string, option: any) => {
   return option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
 }
 

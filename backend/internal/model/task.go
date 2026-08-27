@@ -13,9 +13,9 @@ type Task struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	Title       string `gorm:"size:200;not null" json:"title"`        // 任务标题
-	Description string `gorm:"type:text" json:"description"`         // 任务描述（Markdown）
-	Status      string `gorm:"size:20;default:'wait'" json:"status"`  // 状态：wait(未开始), doing(进行中), done(已完成), pause(已暂停), cancel(已取消), closed(已关闭)
+	Title       string `gorm:"size:200;not null" json:"title"`           // 任务标题
+	Description string `gorm:"type:text" json:"description"`             // 任务描述（Markdown）
+	Status      string `gorm:"size:20;default:'wait'" json:"status"`     // 状态：wait(未开始), doing(进行中), done(已完成), pause(已暂停), cancel(已取消), closed(已关闭)
 	Priority    string `gorm:"size:20;default:'medium'" json:"priority"` // 优先级：low, medium, high, urgent
 
 	ProjectID uint    `gorm:"index;not null" json:"project_id"`
@@ -27,7 +27,7 @@ type Task struct {
 	Level    int    `gorm:"default:1;not null" json:"level"`
 	NodeType string `gorm:"size:20;default:'task';not null;index" json:"node_type"` // group: 分类节点，task: 具体执行任务
 
-	RequirementID *uint       `gorm:"index" json:"requirement_id"`
+	RequirementID *uint        `gorm:"index" json:"requirement_id"`
 	Requirement   *Requirement `gorm:"foreignKey:RequirementID" json:"requirement,omitempty"`
 
 	CreatorID uint `gorm:"index" json:"creator_id"`
@@ -35,15 +35,38 @@ type Task struct {
 
 	AssigneeID *uint `gorm:"index" json:"assignee_id"`
 	Assignee   *User `gorm:"foreignKey:AssigneeID" json:"assignee,omitempty"`
+	// 智慧仓储任务允许填写系统外的乙方负责人，也允许选择系统用户。
+	AssigneeName      string               `gorm:"size:100" json:"assignee_name"`
+	ExternalContactID *uint                `gorm:"index" json:"external_contact_id"`
+	ExternalContact   *ExternalTaskContact `gorm:"foreignKey:ExternalContactID" json:"external_contact,omitempty"`
 
-	StartDate *time.Time `json:"start_date"` // 开始日期
-	EndDate   *time.Time `json:"end_date"`   // 结束日期
-	DueDate   *time.Time `json:"due_date"`   // 截止日期
+	CounterpartID   *uint  `gorm:"index" json:"counterpart_id"`
+	Counterpart     *User  `gorm:"foreignKey:CounterpartID" json:"counterpart,omitempty"`
+	CounterpartName string `gorm:"size:100" json:"counterpart_name"` // 甲方对口人（可为系统外姓名）
+
+	StartDate   *time.Time `json:"start_date"`                // 开始日期
+	EndDate     *time.Time `json:"end_date"`                  // 结束日期
+	DueDate     *time.Time `json:"due_date"`                  // 截止日期
+	CompletedAt *time.Time `gorm:"index" json:"completed_at"` // 首次进入已完成状态的时间，用于次日自动隐藏
 
 	Progress int `gorm:"default:0" json:"progress"` // 进度：0-100
 
-	EstimatedHours *float64 `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
-	ActualHours    *float64 `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
+	// 自动化项目专用任务字段
+	TaskSequence    string `gorm:"size:50" json:"task_sequence"`
+	Milestone1      string `gorm:"type:text" json:"milestone1"`
+	Milestone2      string `gorm:"type:text" json:"milestone2"`
+	Milestone3      string `gorm:"type:text" json:"milestone3"`
+	CurrentNode     string `gorm:"type:text" json:"current_node"`
+	PlanProgress    int    `gorm:"default:0" json:"plan_progress"`
+	ReasonAnalysis  string `gorm:"type:text" json:"reason_analysis"`
+	RequiredSupport string `gorm:"type:text" json:"required_support"`
+
+	EstimatedHours *float64   `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
+	ActualHours    *float64   `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
+	PlannedDays    int        `gorm:"-" json:"planned_days"`            // 智慧仓储任务计划天数（含首尾日期）
+	ActualDays     int        `gorm:"-" json:"actual_days"`             // 智慧仓储任务实际天数（含开始当天）
+	LatestUpdate   string     `gorm:"type:text" json:"latest_update"`
+	LatestUpdateAt *time.Time `json:"latest_update_at"`
 
 	// 任务依赖关系（多对多）
 	Dependencies []Task `gorm:"many2many:task_dependencies;joinForeignKey:task_id;joinReferences:dependency_id" json:"dependencies,omitempty"`
@@ -51,8 +74,8 @@ type Task struct {
 
 // TaskDependency 任务依赖关系表
 type TaskDependency struct {
-	TaskID       uint `gorm:"primaryKey" json:"task_id"`
-	DependencyID uint `gorm:"primaryKey" json:"dependency_id"`
+	TaskID       uint   `gorm:"primaryKey" json:"task_id"`
+	DependencyID uint   `gorm:"primaryKey" json:"dependency_id"`
 	Type         string `gorm:"size:20;default:'finish_to_start'" json:"type"` // 依赖类型：finish_to_start, start_to_start, finish_to_finish, start_to_finish
 }
 
@@ -63,8 +86,8 @@ type Board struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	Name        string `gorm:"size:100;not null" json:"name"`        // 看板名称
-	Description string `gorm:"type:text" json:"description"`            // 描述
+	Name        string `gorm:"size:100;not null" json:"name"` // 看板名称
+	Description string `gorm:"type:text" json:"description"`  // 描述
 
 	ProjectID uint    `gorm:"index;not null" json:"project_id"`
 	Project   Project `gorm:"foreignKey:ProjectID" json:"project,omitempty"`
@@ -79,13 +102,12 @@ type BoardColumn struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	Name  string `gorm:"size:50;not null" json:"name"`  // 列名称
-	Color string `gorm:"size:20" json:"color"`           // 列颜色
-	Sort  int    `gorm:"default:0" json:"sort"`          // 排序
+	Name  string `gorm:"size:50;not null" json:"name"` // 列名称
+	Color string `gorm:"size:20" json:"color"`         // 列颜色
+	Sort  int    `gorm:"default:0" json:"sort"`        // 排序
 
-	BoardID uint   `gorm:"index;not null" json:"board_id"`
-	Board   Board  `gorm:"foreignKey:BoardID" json:"board,omitempty"`
+	BoardID uint  `gorm:"index;not null" json:"board_id"`
+	Board   Board `gorm:"foreignKey:BoardID" json:"board,omitempty"`
 
 	Status string `gorm:"size:20" json:"status"` // 关联的任务状态
 }
-

@@ -222,7 +222,6 @@
       @cancel="handleStatusCancel"
     >
       <a-form
-        ref="statusFormRef"
         :model="statusFormData"
         :label-col="{ span: 6 }"
         :wrapper-col="{ span: 18 }"
@@ -555,7 +554,6 @@ const noteFormRules = {
 
 // 解决对话框相关
 const statusModalVisible = ref(false)
-const statusFormRef = ref()
 const statusFormData = reactive({
   status: 'resolved' as string,
   solution: undefined as string | undefined,

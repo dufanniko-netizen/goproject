@@ -534,7 +534,6 @@
       @cancel="handleStatusCancel"
     >
       <a-form
-        ref="statusFormRef"
         :model="statusFormData"
         :label-col="{ span: 6 }"
         :wrapper-col="{ span: 18 }"
@@ -995,7 +994,6 @@ const assignFormData = reactive({
 })
 
 const statusModalVisible = ref(false)
-const statusFormRef = ref()
 const statusFormData = reactive({
   bug_id: 0,
   status: 'active' as string,

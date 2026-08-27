@@ -189,9 +189,9 @@ func (h *AttachmentHandler) GetAttachment(c *gin.Context) {
 	if utils.IsAdmin(c) {
 		hasAccess = true
 	} else {
-		// 检查用户是否是附件关联的任意一个项目的成员
+		// 检查用户是否可只读访问附件关联的任意一个项目
 		for _, project := range attachment.Projects {
-			if utils.CheckProjectAccess(h.db, c, project.ID) {
+			if utils.CheckProjectReadAccess(h.db, c, project.ID) {
 				hasAccess = true
 				break
 			}
@@ -224,9 +224,9 @@ func (h *AttachmentHandler) DownloadFile(c *gin.Context) {
 	if utils.IsAdmin(c) {
 		hasAccess = true
 	} else {
-		// 检查用户是否是附件关联的任意一个项目的成员
+		// 检查用户是否可只读访问附件关联的任意一个项目
 		for _, project := range attachment.Projects {
-			if utils.CheckProjectAccess(h.db, c, project.ID) {
+			if utils.CheckProjectReadAccess(h.db, c, project.ID) {
 				hasAccess = true
 				break
 			}
@@ -342,8 +342,8 @@ func (h *AttachmentHandler) GetAttachments(c *gin.Context) {
 	if projectID := c.Query("project_id"); projectID != "" {
 		var pid uint
 		if _, err := fmt.Sscanf(projectID, "%d", &pid); err == nil {
-			// 验证项目访问权限
-			if !utils.CheckProjectAccess(h.db, c, pid) {
+			// 验证项目只读访问权限
+			if !utils.CheckProjectReadAccess(h.db, c, pid) {
 				utils.Error(c, 403, "没有权限访问该项目")
 				return
 			}
@@ -368,8 +368,8 @@ func (h *AttachmentHandler) GetAttachments(c *gin.Context) {
 	if taskID := c.Query("task_id"); taskID != "" {
 		var tid uint
 		if _, err := fmt.Sscanf(taskID, "%d", &tid); err == nil {
-			// 验证任务访问权限
-			if !utils.CheckTaskAccess(h.db, c, tid) {
+			// 验证任务只读访问权限
+			if !utils.CheckTaskReadAccess(h.db, c, tid) {
 				utils.Error(c, 403, "没有权限访问该任务")
 				return
 			}

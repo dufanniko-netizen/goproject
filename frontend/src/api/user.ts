@@ -11,6 +11,8 @@ export interface User {
   status: number
   department_id?: number
   department?: Department
+  supervisor_id?: number
+  supervisor?: User
   roles?: Role[]
   created_at?: string
   updated_at?: string
@@ -75,6 +77,7 @@ export interface CreateUserRequest {
   avatar?: string
   status?: number
   department_id?: number
+  supervisor_id?: number
 }
 
 export interface UpdateUserRequest extends CreateUserRequest {

@@ -39,3 +39,15 @@ upload:
   # 示例：["image/jpeg", "image/png", "application/pdf"]
   allowed_types: []
 
+email:
+  enabled: false
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  from_address: ""
+  from_name: "项目管理系统"
+  base_url: "http://47.115.147.201"
+  tls_mode: "starttls"
+  timeout_seconds: 10
+

@@ -14,20 +14,39 @@ export interface Task {
   creator?: any
   assignee_id?: number
   assignee?: any
+  assignee_name?: string
+  counterpart_id?: number
+  counterpart?: any
+  counterpart_name?: string
+	 external_contact_id?: number
+	 external_contact?: ExternalTaskContact
   start_date?: string
   end_date?: string
   due_date?: string
   progress: number
   estimated_hours?: number
   actual_hours?: number
+  planned_days?: number
+  actual_days?: number
   dependencies?: Task[]
   parent_id?: number
   parent?: Task
   children?: Task[]
   level: number
   node_type?: 'group' | 'task'
+  task_sequence?: string
+  milestone1?: string
+  milestone2?: string
+  milestone3?: string
+  current_node?: string
+  plan_progress?: number
+  reason_analysis?: string
+  required_support?: string
   created_at?: string
   updated_at?: string
+  completed_at?: string
+  latest_update?: string
+  latest_update_at?: string
 }
 
 export interface TaskListResponse {
@@ -45,6 +64,10 @@ export interface CreateTaskRequest {
   project_id: number
   requirement_id?: number
   assignee_id?: number
+  assignee_name?: string
+  counterpart_id?: number
+  counterpart_name?: string
+	 external_contact_id?: number
   start_date?: string
   end_date?: string
   due_date?: string
@@ -54,6 +77,26 @@ export interface CreateTaskRequest {
   work_date?: string
   dependency_ids?: number[]
   parent_id?: number
+  task_sequence?: string
+  milestone1?: string
+  milestone2?: string
+  milestone3?: string
+  current_node?: string
+  plan_progress?: number
+  reason_analysis?: string
+  required_support?: string
+}
+
+export interface ExternalTaskContact {
+	id: number
+	project_id: number
+	name: string
+	company?: string
+	recipient?: string
+	email: string
+	cc_emails?: string
+	enabled: boolean
+	notes?: string
 }
 
 export interface UpdateTaskStatusRequest {
@@ -76,6 +119,7 @@ export const getTasks = async (params?: {
   assignee_id?: number
   creator_id?: number
   node_type?: 'group' | 'task'
+  hide_historical_completed?: boolean
   page?: number
   size?: number
 }): Promise<TaskListResponse> => {

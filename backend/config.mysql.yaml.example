@@ -29,3 +29,15 @@ wechat:
   # 仅当 account_type 为 "official_account" 时有效
   scope: "snsapi_userinfo"
 
+email:
+  enabled: false
+  host: "smtp.example.com"
+  port: 587
+  username: "notice@example.com"
+  password: "请填写邮箱SMTP授权码"
+  from_address: "notice@example.com"
+  from_name: "项目管理系统"
+  base_url: "https://project.example.com"
+  tls_mode: "starttls"
+  timeout_seconds: 10
+

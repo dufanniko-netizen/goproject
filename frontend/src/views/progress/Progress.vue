@@ -6,10 +6,13 @@
         <div class="content-inner">
           <a-page-header
             :title="`进度跟踪 - ${project?.name || ''}`"
-            @back="() => router.push(`/project/${projectId}`)"
+            @back="() => router.push({ path: '/task', query: { project_id: projectId } })"
           >
             <template #extra>
-              <a-button @click="handleRefresh">刷新</a-button>
+              <a-space>
+                <a-button @click="router.push({ path: '/task', query: { project_id: projectId } })">返回任务管理</a-button>
+                <a-button @click="handleRefresh">刷新</a-button>
+              </a-space>
             </template>
           </a-page-header>
 
@@ -492,6 +495,11 @@ const handleRefresh = () => {
 // 获取状态文本
 const getStatusText = (status: string) => {
   const texts: Record<string, string> = {
+    wait: '未开始',
+    doing: '进行中',
+    pause: '已暂停',
+    closed: '已延期',
+    cancel: '已取消',
     todo: '待办',
     in_progress: '进行中',
     done: '已完成',

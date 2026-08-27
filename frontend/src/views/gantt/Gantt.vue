@@ -6,10 +6,11 @@
         <div class="content-inner">
           <a-page-header
             :title="`甘特图 - ${project?.name || ''}`"
-            @back="() => router.push(`/project/${projectId}`)"
+            @back="() => router.push({ path: '/task', query: { project_id: projectId } })"
           >
             <template #extra>
               <a-space>
+                <a-button @click="router.push({ path: '/task', query: { project_id: projectId } })">返回任务管理</a-button>
                 <a-button @click="handleRefresh">刷新</a-button>
                 <a-button @click="handleViewTask" v-if="selectedTask">查看任务</a-button>
               </a-space>
@@ -17,7 +18,7 @@
           </a-page-header>
 
           <a-spin :spinning="loading">
-            <div class="gantt-container" ref="ganttContainerRef" v-if="tasks.length > 0">
+            <div class="gantt-container" v-if="tasks.length > 0">
               <!-- 甘特图时间轴 -->
               <div class="gantt-header">
                 <div class="gantt-task-column" style="width: 300px; border-right: 1px solid #d9d9d9;">
@@ -163,7 +164,6 @@ const projectId = ref<number>(0)
 const selectedTask = ref<GanttTask | null>(null)
 const timelineRef = ref<HTMLElement>()
 const timelineBodyRef = ref<HTMLElement>()
-const ganttContainerRef = ref<HTMLElement>()
 
 const dayWidth = 30 // 每天的宽度（像素）
 const rowHeight = 60 // 每行的高度（像素）

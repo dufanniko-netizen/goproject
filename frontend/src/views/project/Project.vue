@@ -8,6 +8,9 @@
           <div>
               <a-page-header title="项目管理">
                 <template #extra>
+                  <a-badge :count="pendingApprovalProjects.length" :offset="[-6, 2]">
+                    <a-button @click="openApprovalCenter">待我审核</a-button>
+                  </a-badge>
                   <a-button type="primary" @click="handleCreateProject">
                     <template #icon><PlusOutlined /></template>
                     新增项目
@@ -96,6 +99,18 @@
                         {{ getProjectStatusText(record.status) }}
                       </a-tag>
                     </template>
+                    <template v-else-if="column.key === 'project_type'">
+                      <a-tag :color="record.project_type === 'automation' ? 'purple' : 'blue'">
+                        {{ record.project_type === 'automation' ? '自动化项目' : '智慧仓库' }}
+                      </a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'approval_status'">
+                      <a-tooltip :title="getLatestRejectionComment(record)">
+                        <a-tag :color="getApprovalStatusColor(record.approval_status)">
+                          {{ getApprovalStatusText(record.approval_status) }}
+                        </a-tag>
+                      </a-tooltip>
+                    </template>
                     <template v-else-if="column.key === 'tags'">
                       <div v-if="record.tags && record.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px;">
                         <a-tag v-for="tag in record.tags" :key="tag.id" :color="tag.color || 'blue'" style="margin: 0;">
@@ -112,6 +127,12 @@
                     </template>
                     <template v-else-if="column.key === 'action'">
                       <a-space @click.stop>
+                        <a-button
+                          v-if="record.project_type === 'automation' && ['draft', 'rejected'].includes(record.approval_status) && record.creator_id === authStore.user?.id"
+                          type="link"
+                          size="small"
+                          @click="handleSubmitApproval(record)"
+                        >提交审核</a-button>
                         <a-button type="link" size="small" @click="handleManageRequirements(record)">
                           需求管理
                         </a-button>
@@ -159,6 +180,12 @@
         </a-form-item>
         <a-form-item label="项目编码" name="code">
           <a-input v-model:value="projectFormData.code" placeholder="请输入项目编码" />
+        </a-form-item>
+        <a-form-item label="项目类型" name="project_type">
+          <a-radio-group v-model:value="projectFormData.project_type" :disabled="!!projectFormData.id">
+            <a-radio value="smart_warehouse">智慧仓库（无需审核）</a-radio>
+            <a-radio value="automation">自动化项目（直属上级审核）</a-radio>
+          </a-radio-group>
         </a-form-item>
         <a-form-item label="标签">
           <a-space style="width: 100%" direction="vertical">
@@ -693,6 +720,52 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="approvalCenterVisible" title="待我审核的自动化项目" width="1000px" :footer="null">
+      <a-table :columns="approvalColumns" :data-source="pendingApprovalProjects" :loading="approvalLoading" row-key="id" :pagination="false">
+        <template #expandedRowRender="{ record }">
+          <a-descriptions bordered size="small" :column="2" style="margin-bottom: 12px">
+            <a-descriptions-item label="项目编码">{{ record.code }}</a-descriptions-item>
+            <a-descriptions-item label="项目周期">{{ formatDate(record.start_date) }} 至 {{ formatDate(record.end_date) }}</a-descriptions-item>
+            <a-descriptions-item label="项目说明" :span="2">{{ record.description || '-' }}</a-descriptions-item>
+          </a-descriptions>
+          <a-table
+            size="small"
+            :data-source="record.tasks || []"
+            :pagination="false"
+            row-key="id"
+            :columns="[
+              { title: '层级', dataIndex: 'level', key: 'level', width: 80 },
+              { title: '类型', dataIndex: 'node_type', key: 'node_type', width: 100 },
+              { title: '任务名称', dataIndex: 'title', key: 'title' }
+            ]"
+          />
+        </template>
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'applicant'">
+            {{ record.creator?.nickname || record.creator?.username || '-' }}
+          </template>
+          <template v-else-if="column.key === 'tasks'">
+            {{ record.tasks?.filter((task: any) => task.node_type === 'task').length || 0 }} 个具体任务
+          </template>
+          <template v-else-if="column.key === 'submitted_at'">
+            {{ formatDateTime(record.submitted_at) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button size="small" @click="handleViewDetail(record)">查看完整项目</a-button>
+              <a-button size="small" type="primary" :disabled="record.creator_id === authStore.user?.id" @click="handleReview(record, 'approved')">通过</a-button>
+              <a-button size="small" danger :disabled="record.creator_id === authStore.user?.id" @click="openRejectModal(record)">驳回</a-button>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
+
+    <a-modal v-model:open="rejectModalVisible" title="驳回项目" ok-text="确认驳回" ok-type="danger" @ok="confirmReject">
+      <a-alert message="驳回后项目及任务内容不会丢失，申请人可修改后再次提交。" type="info" show-icon style="margin-bottom: 16px" />
+      <a-textarea v-model:value="rejectComment" :rows="5" placeholder="请填写具体驳回原因（必填）" />
+    </a-modal>
   </div>
 </template>
 
@@ -719,6 +792,9 @@ import {
   removeProjectMember,
   getProjectHistory,
   addProjectHistoryNote,
+  submitProjectApproval,
+  getPendingProjectApprovals,
+  reviewProject,
   type Project,
   type ProjectMember,
   type CreateProjectRequest,
@@ -730,9 +806,11 @@ import { getTags, createTag, type Tag } from '@/api/tag'
 import ModuleManagement from '@/components/ModuleManagement.vue'
 import AttachmentUpload from '@/components/AttachmentUpload.vue'
 import { getAttachments, type Attachment } from '@/api/attachment'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 const projectLoading = ref(false)
 const memberLoading = ref(false)
@@ -775,11 +853,21 @@ const tableScrollHeight = computed(() => {
 const projectColumns = [
   { title: '项目名称', dataIndex: 'name', key: 'name' },
   { title: '项目编码', dataIndex: 'code', key: 'code' },
+  { title: '项目类型', key: 'project_type', width: 120 },
+  { title: '审核状态', key: 'approval_status', width: 100 },
   { title: '标签', key: 'tags', width: 200 },
   { title: '开始日期', dataIndex: 'start_date', key: 'start_date', width: 120 },
   { title: '结束日期', dataIndex: 'end_date', key: 'end_date', width: 120 },
   { title: '状态', key: 'status', width: 80 },
-  { title: '操作', key: 'action', width: 200, fixed: 'right' as const }
+  { title: '操作', key: 'action', width: 280, fixed: 'right' as const }
+]
+
+const approvalColumns = [
+  { title: '项目名称', dataIndex: 'name', key: 'name' },
+  { title: '申请人', key: 'applicant', width: 130 },
+  { title: '任务', key: 'tasks', width: 110 },
+  { title: '提交时间', key: 'submitted_at', width: 180 },
+  { title: '操作', key: 'action', width: 280 }
 ]
 
 const memberColumns = [
@@ -796,6 +884,7 @@ const projectFormData = reactive<Omit<CreateProjectRequest, 'start_date' | 'end_
   code: '',
   description: '',
   status: 'wait',
+  project_type: 'smart_warehouse',
   tag_ids: [] as number[], // 改为标签ID数组
   attachment_ids: [] as number[] // 附件ID列表
 })
@@ -804,8 +893,16 @@ const projectAttachments = ref<Attachment[]>([]) // 项目附件列表
 
 const projectFormRules = {
   name: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
-  code: [{ required: true, message: '请输入项目编码', trigger: 'blur' }]
+  code: [{ required: true, message: '请输入项目编码', trigger: 'blur' }],
+  project_type: [{ required: true, message: '请选择项目类型', trigger: 'change' }]
 }
+
+const approvalCenterVisible = ref(false)
+const approvalLoading = ref(false)
+const pendingApprovalProjects = ref<Project[]>([])
+const rejectModalVisible = ref(false)
+const rejectComment = ref('')
+const rejectingProject = ref<Project | null>(null)
 
 const memberModalVisible = ref(false)
 const selectedUserIds = ref<number[]>([])
@@ -880,6 +977,73 @@ const loadProjects = async () => {
   } finally {
     projectLoading.value = false
   }
+}
+
+const loadPendingApprovals = async () => {
+  approvalLoading.value = true
+  try {
+    pendingApprovalProjects.value = await getPendingProjectApprovals()
+  } catch (error: any) {
+    message.error(error.message || '加载待审核项目失败')
+  } finally {
+    approvalLoading.value = false
+  }
+}
+
+const openApprovalCenter = async () => {
+  approvalCenterVisible.value = true
+  await loadPendingApprovals()
+}
+
+const handleSubmitApproval = async (project: Project) => {
+  try {
+    await submitProjectApproval(project.id)
+    message.success('已提交直属上级审核，审核期间项目和任务将锁定')
+    await loadProjects()
+    await loadPendingApprovals()
+  } catch (error: any) {
+    message.error(error.message || '提交审核失败')
+  }
+}
+
+const handleReview = async (project: Project, decision: 'approved' | 'rejected', comment?: string) => {
+  try {
+    await reviewProject(project.id, decision, comment)
+    message.success(decision === 'approved' ? '审核通过，项目已发布' : '项目已驳回')
+    rejectModalVisible.value = false
+    await loadPendingApprovals()
+    await loadProjects()
+  } catch (error: any) {
+    message.error(error.message || '审核失败')
+  }
+}
+
+const openRejectModal = (project: Project) => {
+  rejectingProject.value = project
+  rejectComment.value = ''
+  rejectModalVisible.value = true
+}
+
+const confirmReject = async () => {
+  if (!rejectComment.value.trim()) {
+    message.warning('请填写驳回原因')
+    return
+  }
+  if (rejectingProject.value) await handleReview(rejectingProject.value, 'rejected', rejectComment.value.trim())
+}
+
+const getApprovalStatusText = (status?: string) => ({
+  draft: '草稿', pending: '待直属上级审核', rejected: '已驳回', published: '已发布'
+}[status || 'published'] || status)
+
+const getApprovalStatusColor = (status?: string) => ({
+  draft: 'default', pending: 'processing', rejected: 'error', published: 'success'
+}[status || 'published'] || 'default')
+
+const getLatestRejectionComment = (project: Project) => {
+  if (project.approval_status !== 'rejected') return ''
+  const rejection = project.approval_records?.find(record => record.status === 'rejected')
+  return rejection?.comment ? `驳回原因：${rejection.comment}` : '项目已被驳回，请修改后重新提交'
 }
 
 // 加载用户列表
@@ -977,6 +1141,7 @@ const handleCreateProject = () => {
     projectFormData.code = ''
     projectFormData.description = ''
     projectFormData.status = 'wait'
+    projectFormData.project_type = 'smart_warehouse'
     // 从 localStorage 恢复最后选择的标签
     const lastTagIds = getLastSelected<number[]>('last_selected_project_tags_form')
     projectFormData.tag_ids = lastTagIds || []
@@ -1019,6 +1184,7 @@ const handleEditProject = async (record: Project) => {
     code: record.code,
     description: record.description || '',
     status: record.status,
+    project_type: record.project_type || 'smart_warehouse',
     tag_ids: record.tags ? record.tags.map(tag => tag.id) : []
   })
   if (record.start_date) {
@@ -1052,6 +1218,7 @@ const handleProjectSubmit = async () => {
       code: projectFormData.code,
       description: projectFormData.description,
       status: projectFormData.status,
+      project_type: projectFormData.project_type,
       tag_ids: projectFormData.tag_ids || []
     }
     if (projectFormData.start_date) {
@@ -1680,6 +1847,7 @@ onMounted(() => {
   loadProjects()
   loadUsers()
   loadTags()
+  loadPendingApprovals()
   
   // 检查URL参数edit
   if (route.query.edit) {

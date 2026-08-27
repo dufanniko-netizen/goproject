@@ -24,6 +24,7 @@ import (
 	"project-management/internal/api"
 	"project-management/internal/config"
 	"project-management/internal/middleware"
+	"project-management/internal/service"
 	"project-management/internal/utils"
 	"project-management/internal/websocket"
 
@@ -36,7 +37,7 @@ var frontendFS embed.FS
 
 // 版本信息（可以通过构建时注入）
 var (
-	Version   = "v0.4.13"  // 版本号
+	Version   = "v0.4.13" // 版本号
 	BuildTime = "unknown" // 构建时间
 	GitCommit = "unknown" // Git提交哈希
 )
@@ -684,6 +685,7 @@ func main() {
 	} else {
 		log.Println("Database migrated successfully")
 	}
+	service.StartTaskDispatchScheduler(db)
 
 	// 创建Gin引擎
 	r := gin.New()
@@ -842,23 +844,34 @@ func main() {
 
 	// 项目管理路由
 	projectHandler := api.NewProjectHandler(db)
+	taskDispatchHandler := api.NewTaskDispatchHandler(db)
 
 	// 看板管理路由（需要在项目路由之前定义，因为项目路由中会用到）
 	boardHandler := api.NewBoardHandler(db)
 
 	projectGroup := r.Group("/api/projects", middleware.Auth())
 	{
+		projectGroup.GET("/approvals/pending", middleware.RequirePermission(db, "project:read"), projectHandler.GetPendingProjectApprovals)
 		projectGroup.GET("", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjects)
 		// 注意：统计接口、看板接口和甘特图接口需要在详情接口之前，避免路由冲突
 		projectGroup.GET("/:id/statistics", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectStatistics)
 		projectGroup.GET("/:id/progress", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectProgress)
 		projectGroup.GET("/:id/gantt", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectGantt)
+		projectGroup.GET("/:id/task-contacts", middleware.RequirePermission(db, "task:read"), taskDispatchHandler.ListContacts)
+		projectGroup.POST("/:id/task-contacts", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.CreateContact)
+		projectGroup.PUT("/:id/task-contacts/:contact_id", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.UpdateContact)
+		projectGroup.DELETE("/:id/task-contacts/:contact_id", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.DeleteContact)
+		projectGroup.GET("/:id/task-dispatches", middleware.RequirePermission(db, "task:read"), taskDispatchHandler.ListBatches)
+		projectGroup.POST("/:id/task-dispatches/send", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.SendNow)
 		// 项目看板路由（需要在详情路由之前）
 		projectGroup.GET("/:id/boards", middleware.RequirePermission(db, "project:read"), boardHandler.GetProjectBoards)
 		projectGroup.POST("/:id/boards", middleware.RequirePermission(db, "project:manage"), boardHandler.CreateBoard)
 		projectGroup.GET("/:id", middleware.RequirePermission(db, "project:read"), projectHandler.GetProject)
 		projectGroup.POST("", middleware.RequirePermission(db, "project:create"), projectHandler.CreateProject)
 		projectGroup.PUT("/:id", middleware.RequirePermission(db, "project:update"), projectHandler.UpdateProject)
+		projectGroup.POST("/:id/submit-approval", middleware.RequirePermission(db, "project:update"), projectHandler.SubmitProjectApproval)
+		projectGroup.POST("/:id/review", middleware.RequirePermission(db, "project:read"), projectHandler.ReviewProject)
+		projectGroup.GET("/:id/approvals", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectApprovals)
 		projectGroup.DELETE("/:id", middleware.RequirePermission(db, "project:delete"), projectHandler.DeleteProject)
 		// 项目历史记录
 		projectGroup.GET("/:id/history", middleware.RequirePermission(db, "project:read"), projectHandler.GetProjectHistory)
@@ -929,6 +942,13 @@ func main() {
 		taskGroup.GET("/:id/history", middleware.RequirePermission(db, "task:read"), taskHandler.GetTaskHistory)
 		taskGroup.POST("/:id/history/note", middleware.RequirePermission(db, "task:update"), taskHandler.AddTaskHistoryNote)
 		taskGroup.PATCH("/:id/progress", middleware.RequirePermission(db, "task:update"), taskHandler.UpdateTaskProgress)
+	}
+
+	taskDispatchGroup := r.Group("/api/task-dispatch", middleware.Auth())
+	{
+		taskDispatchGroup.POST("/import", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.ImportExcel)
+		taskDispatchGroup.GET("/time-change-requests", middleware.RequirePermission(db, "task:read"), taskDispatchHandler.ListTimeChangeRequests)
+		taskDispatchGroup.POST("/time-change-requests/:id/review", middleware.RequirePermission(db, "task:update"), taskDispatchHandler.ReviewTimeChange)
 	}
 
 	// 看板管理路由（看板属于项目的一部分）

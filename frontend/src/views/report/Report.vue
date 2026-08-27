@@ -415,7 +415,6 @@
         </a-form-item>
         <a-form-item label="工作内容" name="content">
           <MarkdownEditor
-            ref="dailyContentEditorRef"
             v-model="dailyFormData.content"
             placeholder="请输入工作内容（支持Markdown）"
             :rows="8"
@@ -479,7 +478,6 @@
         </a-form-item>
         <a-form-item label="工作总结" name="summary">
           <MarkdownEditor
-            ref="weeklySummaryEditorRef"
             v-model="weeklyFormData.summary"
             placeholder="请输入工作总结（支持Markdown）"
             :rows="8"
@@ -487,7 +485,6 @@
         </a-form-item>
         <a-form-item label="下周计划" name="next_week_plan">
           <MarkdownEditor
-            ref="weeklyPlanEditorRef"
             v-model="weeklyFormData.next_week_plan"
             placeholder="请输入下周计划（支持Markdown）"
             :rows="8"
@@ -748,7 +745,6 @@ const dailyColumns = [
 const dailyModalVisible = ref(false)
 const dailyModalTitle = ref('新增日报')
 const dailyFormRef = ref()
-const dailyContentEditorRef = ref()
 const dailyFormData = reactive<{
   id?: number
   date?: Dayjs
@@ -792,8 +788,6 @@ const weeklyColumns = [
 const weeklyModalVisible = ref(false)
 const weeklyModalTitle = ref('新增周报')
 const weeklyFormRef = ref()
-const weeklySummaryEditorRef = ref()
-const weeklyPlanEditorRef = ref()
 const weeklyFormData = reactive<{
   id?: number
   week_start?: Dayjs

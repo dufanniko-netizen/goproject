@@ -5,6 +5,7 @@ import (
 	"gorm.io/gorm"
 	"project-management/internal/model"
 	"project-management/internal/utils"
+	"time"
 )
 
 type BoardHandler struct {
@@ -42,7 +43,7 @@ func (h *BoardHandler) GetBoard(c *gin.Context) {
 	for i := range board.Columns {
 		column := &board.Columns[i]
 		var tasks []model.Task
-		query := h.db.Where("project_id = ?", board.ProjectID)
+		query := h.db.Where("project_id = ? AND node_type = ?", board.ProjectID, "task")
 		if column.Status != "" {
 			query = query.Where("status = ?", column.Status)
 		}
@@ -96,10 +97,10 @@ func (h *BoardHandler) CreateBoard(c *gin.Context) {
 	if len(req.Columns) > 0 {
 		for i, col := range req.Columns {
 			column := model.BoardColumn{
-				Name:   col.Name,
-				Color:  col.Color,
-				Status: col.Status,
-				Sort:   col.Sort,
+				Name:    col.Name,
+				Color:   col.Color,
+				Status:  col.Status,
+				Sort:    col.Sort,
 				BoardID: board.ID,
 			}
 			if column.Sort == 0 {
@@ -200,10 +201,10 @@ func (h *BoardHandler) CreateBoardColumn(c *gin.Context) {
 	}
 
 	column := model.BoardColumn{
-		Name:   req.Name,
-		Color:  req.Color,
-		Status: req.Status,
-		Sort:   req.Sort,
+		Name:    req.Name,
+		Color:   req.Color,
+		Status:  req.Status,
+		Sort:    req.Sort,
 		BoardID: board.ID,
 	}
 
@@ -313,7 +314,9 @@ func (h *BoardHandler) MoveTask(c *gin.Context) {
 
 	// 更新任务状态（根据列的状态）
 	if column.Status != "" {
+		oldStatus := task.Status
 		task.Status = column.Status
+		updateTaskCompletionTime(&task, oldStatus, time.Now())
 		// 如果状态为done，自动设置进度为100
 		if column.Status == "done" {
 			task.Progress = 100
@@ -344,7 +347,13 @@ func (h *BoardHandler) GetBoardTasks(c *gin.Context) {
 
 	// 获取项目的所有任务
 	var allTasks []model.Task
-	h.db.Where("project_id = ?", board.ProjectID).
+	query := h.db.Where("project_id = ? AND node_type = ?", board.ProjectID, "task")
+	if c.Query("hide_historical_completed") == "true" {
+		now := time.Now()
+		startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		query = query.Where("status <> ? OR COALESCE(completed_at, updated_at) >= ?", "done", startOfToday)
+	}
+	query.
 		Preload("Creator").Preload("Assignee").
 		Order("created_at DESC").
 		Find(&allTasks)
@@ -366,4 +375,3 @@ func (h *BoardHandler) GetBoardTasks(c *gin.Context) {
 
 	utils.Success(c, result)
 }
-
