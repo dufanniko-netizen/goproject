@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -768,6 +769,52 @@ func (h *ProjectHandler) GetProjectGantt(c *gin.Context) {
 		utils.Error(c, utils.CodeError, "查询任务失败")
 		return
 	}
+	today := time.Now().Format("2006-01-02")
+	statusRank := func(task model.Task) int {
+		switch task.Status {
+		case "closed":
+			return 1
+		case "doing":
+			return 2
+		case "done":
+			completed := task.UpdatedAt
+			if task.CompletedAt != nil {
+				completed = *task.CompletedAt
+			}
+			if completed.Format("2006-01-02") == today {
+				return 3
+			}
+			return 5
+		case "wait":
+			return 4
+		default:
+			return 5
+		}
+	}
+	hierarchyIDs := func(task model.Task) (uint, uint) {
+		if task.Parent != nil && task.Parent.Parent != nil {
+			return task.Parent.Parent.ID, task.Parent.ID
+		}
+		if task.Parent != nil {
+			return task.Parent.ID, task.ID
+		}
+		return task.ID, task.ID
+	}
+	sort.SliceStable(tasks, func(i, j int) bool {
+		leftRank, rightRank := statusRank(tasks[i]), statusRank(tasks[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		leftLevel1, leftLevel2 := hierarchyIDs(tasks[i])
+		rightLevel1, rightLevel2 := hierarchyIDs(tasks[j])
+		if leftLevel1 != rightLevel1 {
+			return leftLevel1 < rightLevel1
+		}
+		if leftLevel2 != rightLevel2 {
+			return leftLevel2 < rightLevel2
+		}
+		return tasks[i].ID < tasks[j].ID
+	})
 
 	// 转换为甘特图数据格式
 	type GanttTask struct {

@@ -164,7 +164,14 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 
 	countQuery.Count(&total)
 
-	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&tasks).Error; err != nil {
+	query = query.
+		Joins("LEFT JOIN tasks AS task_parent ON task_parent.id = tasks.parent_id").
+		Joins("LEFT JOIN tasks AS task_grandparent ON task_grandparent.id = task_parent.parent_id").
+		Order("CASE WHEN tasks.status = 'closed' THEN 1 WHEN tasks.status = 'doing' THEN 2 WHEN tasks.status = 'done' AND date(COALESCE(tasks.completed_at, tasks.updated_at)) = date('now', 'localtime') THEN 3 WHEN tasks.status = 'wait' THEN 4 ELSE 5 END ASC").
+		Order("COALESCE(task_grandparent.id, CASE WHEN task_parent.level = 1 THEN task_parent.id END, tasks.id) ASC").
+		Order("COALESCE(CASE WHEN task_parent.level = 2 THEN task_parent.id END, tasks.id) ASC").
+		Order("tasks.id ASC")
+	if err := query.Offset(offset).Limit(pageSize).Find(&tasks).Error; err != nil {
 		utils.Error(c, utils.CodeError, "查询失败")
 		return
 	}
