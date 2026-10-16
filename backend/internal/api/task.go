@@ -176,6 +176,10 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	for i := range tasks {
 		applySmartWarehouseCalculatedHours(&tasks[i], time.Now())
 	}
+	if err := h.loadTaskDailyProgress(tasks); err != nil {
+		utils.Error(c, utils.CodeError, "读取每日进展失败")
+		return
+	}
 
 	utils.Success(c, gin.H{
 		"list":      tasks,
