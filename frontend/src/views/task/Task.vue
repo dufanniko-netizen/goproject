@@ -157,7 +157,15 @@
                 </template>
                 <template v-else-if="column.key === 'reason_analysis'">{{ record.reason_analysis || '-' }}</template>
                 <template v-else-if="column.key === 'required_support'">{{ record.required_support || '-' }}</template>
-                <template v-else-if="column.key === 'latest_update'">{{ record.latest_update || '-' }}</template>
+                <template v-else-if="column.key === 'latest_update'">
+                  <div v-if="record.daily_progress?.length" class="daily-progress-list">
+                    <div v-for="(entry, index) in record.daily_progress" :key="index" class="daily-progress-entry">
+                      <div class="daily-progress-date">{{ formatDateTime(entry.date) }}</div>
+                      <div class="daily-progress-content">{{ entry.content || '（已清空任务描述）' }}</div>
+                    </div>
+                  </div>
+                  <div v-else class="daily-progress-content">{{ record.description || '-' }}</div>
+                </template>
                 <template v-else-if="column.key === 'level1'">
                   <a-button
                     v-if="record.node_type === 'group' && record.level === 1"
@@ -854,7 +862,7 @@ const baseColumns = [
   { title: '进度', key: 'progress', width: 130 },
   { title: '工时', key: 'hours', width: 150 },
   { title: '日期', key: 'dates', width: 210 },
-  { title: '每日进展说明', key: 'latest_update', width: 240, ellipsis: true },
+  { title: '每日进展说明', key: 'latest_update', width: 300 },
   { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' as const }
 ]
@@ -1830,6 +1838,27 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.daily-progress-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.daily-progress-entry + .daily-progress-entry {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.daily-progress-date {
+  margin-bottom: 4px;
+  color: #888;
+  font-size: 12px;
+}
+
+.daily-progress-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .task-management {
   height: 100vh;
   display: flex;

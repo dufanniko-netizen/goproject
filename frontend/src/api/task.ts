@@ -47,6 +47,7 @@ export interface Task {
   completed_at?: string
   latest_update?: string
   latest_update_at?: string
+  daily_progress?: { date: string; content: string }[]
 }
 
 export interface TaskListResponse {

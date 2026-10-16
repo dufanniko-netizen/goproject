@@ -61,15 +61,22 @@ type Task struct {
 	ReasonAnalysis  string `gorm:"type:text" json:"reason_analysis"`
 	RequiredSupport string `gorm:"type:text" json:"required_support"`
 
-	EstimatedHours *float64   `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
-	ActualHours    *float64   `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
-	PlannedDays    int        `gorm:"-" json:"planned_days"`            // 智慧仓储任务计划天数（含首尾日期）
-	ActualDays     int        `gorm:"-" json:"actual_days"`             // 智慧仓储任务实际天数（含开始当天）
-	LatestUpdate   string     `gorm:"type:text" json:"latest_update"`
-	LatestUpdateAt *time.Time `json:"latest_update_at"`
+	EstimatedHours *float64            `gorm:"default:0" json:"estimated_hours"` // 预估工时（小时）
+	ActualHours    *float64            `gorm:"default:0" json:"actual_hours"`    // 实际工时（小时），从资源分配自动计算
+	PlannedDays    int                 `gorm:"-" json:"planned_days"`            // 智慧仓储任务计划天数（含首尾日期）
+	ActualDays     int                 `gorm:"-" json:"actual_days"`             // 智慧仓储任务实际天数（含开始当天）
+	LatestUpdate   string              `gorm:"type:text" json:"latest_update"`
+	LatestUpdateAt *time.Time          `json:"latest_update_at"`
+	DailyProgress  []TaskProgressEntry `gorm:"-" json:"daily_progress"`
 
 	// 任务依赖关系（多对多）
 	Dependencies []Task `gorm:"many2many:task_dependencies;joinForeignKey:task_id;joinReferences:dependency_id" json:"dependencies,omitempty"`
+}
+
+// TaskProgressEntry 任务描述的一个历史版本，仅用于展示。
+type TaskProgressEntry struct {
+	Date    time.Time `json:"date"`
+	Content string    `json:"content"`
 }
 
 // TaskDependency 任务依赖关系表
